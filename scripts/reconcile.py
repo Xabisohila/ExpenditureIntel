@@ -65,6 +65,12 @@ def main():
     if not flagged:
         print("  (none)")
 
+    return {
+        'item_recon_total': len(item_recon),
+        'item_recon_flagged': flagged,
+        'resp_recon_flagged_count': len(resp_mismatches),
+    }
+
 
 if __name__ == '__main__':
     main()

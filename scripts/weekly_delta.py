@@ -34,7 +34,7 @@ def main():
     prev_date, latest_date = latest_two_dates(dates)
     if prev_date is None:
         print("Only one week of data on hand -- nothing to diff against yet.")
-        return
+        return {'has_delta': False}
 
     print(f"Week-over-week delta: {prev_date} -> {latest_date}\n")
 
@@ -86,6 +86,15 @@ def main():
         print(f"  RESOLVED: {x['resp2_desc']:35s} {x['item_desc']:30s}")
     if not r['newly_flagged'] and not r['resolved']:
         print("  (no change -- reconciliation status stable)")
+
+    return {
+        'has_delta': True,
+        'prev_date': prev_date,
+        'latest_date': latest_date,
+        'vendor_deltas': v,
+        'dept_deltas': d,
+        'reconciliation_deltas': r,
+    }
 
 
 if __name__ == '__main__':

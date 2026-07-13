@@ -160,6 +160,8 @@ def main():
     print(f"  {data['num_vendors_outstanding']} vendors with outstanding balances, {data['num_flat_vendors']} stale")
     print(f"  {data['num_depts_total']} responsibility units, {data['num_depts_over_50pct']} over 50% of budget committed")
 
+    return data
+
 
 if __name__ == '__main__':
     main()

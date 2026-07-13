@@ -83,6 +83,16 @@ def main():
     write_csv(all_commitment_rows, os.path.join(OUT_DIR, 'commitments.csv'))
     write_csv(all_expenditure_rows, os.path.join(OUT_DIR, 'expenditure.csv'))
 
+    return {
+        'num_files': len(xlsx_paths) + len(pdf_paths),
+        'commitment_rows': len(all_commitment_rows),
+        'commitment_warnings': total_commitment_warnings,
+        'expenditure_rows': len(all_expenditure_rows),
+        'expenditure_warnings': total_expenditure_warnings,
+        'still_blank_resp1_commitment': still_blank_c,
+        'still_blank_resp1_expenditure': still_blank_e,
+    }
+
 
 if __name__ == '__main__':
     main()
