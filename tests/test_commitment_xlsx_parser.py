@@ -57,11 +57,13 @@ class TestParseCommitmentWorkbookIntegration(unittest.TestCase):
     up as a test failure instead of silently reintroducing a bug."""
 
     cases = [
-        ('COM06.07.26.xlsx', '2026-07-06', 129),
+        ('COM19.05.26.xlsx', '2026-05-19', 116),
+        ('COMMITMENT REPORT 01.06.2026.xlsx', '2026-06-01', 176),
+        ('COM15.06.26.xlsx', '2026-06-15', 162),
         ('COM22.06.26.xlsx', '2026-06-22', 182),
         ('COM29.06.26.xlsx', '2026-06-29', 165),
+        ('COM06.07.26.xlsx', '2026-07-06', 129),
         ('COMM13.07.26.xlsx', '2026-07-13', 118),
-        ('COMMITMENT REPORT 01.06.2026.xlsx', '2026-06-01', 176),
     ]
 
     def test_all_weeks_parse_cleanly(self):

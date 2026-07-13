@@ -31,6 +31,8 @@ def build_vendor_data(vendor_trend_rows, dates, latest):
     )
     total_outstanding = sum(b for _, b in vendor_latest)
     sita_balance = vendor_by_week[SITA_VENDOR][latest]
+    sita_first_date = next((d for d in dates if vendor_by_week[SITA_VENDOR].get(d, 0.0) > 0), None)
+    sita_first_balance = vendor_by_week[SITA_VENDOR].get(sita_first_date, 0.0) if sita_first_date else None
 
     top_excl_sita = [(v, b) for v, b in vendor_latest if v != SITA_VENDOR][:10]
     top_vendors_excl_sita = [
@@ -51,10 +53,33 @@ def build_vendor_data(vendor_trend_rows, dates, latest):
         'total_outstanding': round(total_outstanding, 2),
         'sita_balance': round(sita_balance, 2),
         'sita_pct_of_total': round(sita_balance / total_outstanding * 100, 1) if total_outstanding else 0.0,
+        'sita_first_balance': round(sita_first_balance, 2) if sita_first_balance is not None else None,
+        'sita_first_date': sita_first_date,
         'num_vendors_outstanding': len(vendor_latest),
         'num_flat_vendors': len(flat_vendors),
         'top_vendors_excl_sita': top_vendors_excl_sita,
         'flat_vendors': flat_vendors,
+    }
+
+
+def build_reconciliation_data(item_recon_rows):
+    def is_flagged(r):
+        variance = r['variance']
+        return bool(r['note']) or (variance not in (None, '') and abs(float(variance)) > 0.01)
+
+    flagged = [r for r in item_recon_rows if is_flagged(r)]
+    gaps = [{
+        'report_date': r['report_date'],
+        'resp2_desc': r['resp2_desc'],
+        'item_desc': r['item_desc'],
+        'note': r['note'],
+        'variance': float(r['variance']) if r['variance'] not in (None, '') else None,
+    } for r in flagged]
+
+    return {
+        'reconciliation_total': len(item_recon_rows),
+        'reconciliation_matched': len(item_recon_rows) - len(flagged),
+        'reconciliation_gaps': gaps,
     }
 
 
@@ -107,6 +132,7 @@ def build_budget_data(expenditure_rows, dates, latest):
 def main():
     vendor_trend_rows = read_csv(os.path.join(PROCESSED_DIR, 'vendor_weekly_trend.csv'))
     expenditure_rows = read_csv(os.path.join(PROCESSED_DIR, 'expenditure.csv'))
+    item_recon_rows = read_csv(os.path.join(PROCESSED_DIR, 'reconciliation_item_level.csv'))
 
     dates = sorted(set(r['report_date'] for r in vendor_trend_rows))
     latest = dates[-1]
@@ -114,6 +140,7 @@ def main():
     data = {'dates': dates}
     data.update(build_vendor_data(vendor_trend_rows, dates, latest))
     data.update(build_budget_data(expenditure_rows, dates, latest))
+    data.update(build_reconciliation_data(item_recon_rows))
 
     json_str = json.dumps(data)
     assert '</script' not in json_str.lower(), "vendor/department names collided with a script-closing tag"

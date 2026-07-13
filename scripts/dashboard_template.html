@@ -152,8 +152,8 @@
 <div class="viz-root">
   <header class="page-head">
     <h1>Commitments &amp; Budget Intel — Office of the Premier</h1>
-    <p>Five weekly commitment (GRV/vendor ledger) and expenditure control reports, reconciled item-by-item and rolled up by vendor and responsibility unit. Covers 2026-06-01 through 2026-07-13.</p>
-    <div class="caveat">⚠ Data quality note: the 2026-06-01 expenditure PDF has a corrupted embedded font encoding, which dropped the responsibility-unit header line entirely — <b>all 936 rows</b> for that date, not just a few, were missing it. Since a sub-unit belongs to exactly one responsibility unit as a structural fact (confirmed with zero conflicts across every other week, in both this report and the commitment ledger), every one of those 936 rows was safely backfilled from that mapping rather than estimated — the trend chart below reflects the real 2026-06-01 values, not an interpolation. Separately, all figures are independently reconciled to zero variance (574 of 575 item/week comparisons between the two report types match exactly).</div>
+    <p id="header-sub"></p>
+    <div class="caveat">⚠ Data quality note: the 2026-06-01 expenditure PDF has a corrupted embedded font encoding, which dropped the responsibility-unit header line entirely — <b>all 936 rows</b> for that date, not just a few, were missing it. Since a sub-unit belongs to exactly one responsibility unit as a structural fact (confirmed with zero conflicts across every other week, in both this report and the commitment ledger), every one of those 936 rows was safely backfilled from that mapping rather than estimated — the trend chart below reflects the real 2026-06-01 values, not an interpolation. Separately, <span id="recon-summary"></span></div>
   </header>
 
   <section id="stats">
@@ -162,10 +162,10 @@
 
   <section id="vendors">
     <h2>Vendor exposure — outstanding commitments</h2>
-    <p class="section-sub">Unpaid GRV/order balances by vendor, latest snapshot (2026-07-13), with the 5-week trend.</p>
+    <p class="section-sub" id="vendor-sub"></p>
     <div class="hero-box" id="sita-hero"></div>
     <div class="chart-card">
-      <div class="legend"><div class="legend-item"><div class="legend-swatch" style="background:var(--series-1)"></div>Outstanding balance, 2026-07-13 (excl. SITA)</div></div>
+      <div class="legend"><div class="legend-item"><div class="legend-swatch" style="background:var(--series-1)"></div><span id="vendor-legend-label"></span></div></div>
       <div class="bar-list" id="vendor-bars"></div>
     </div>
   </section>
@@ -183,7 +183,7 @@
 
   <section id="budget">
     <h2>Budget burn-down by responsibility unit</h2>
-    <p class="section-sub">Share of each unit's annual budget already spent or committed, latest snapshot (2026-07-13). Sorted highest first.</p>
+    <p class="section-sub" id="budget-sub"></p>
     <div class="chart-card">
       <div class="bar-list" id="dept-bars"></div>
     </div>
@@ -191,15 +191,15 @@
 
   <section id="trend">
     <h2>Spend trajectory — top 3 units</h2>
-    <p class="section-sub">Percent of budget spent + committed, tracked across all five snapshots. Note the uneven spacing: the first gap (Jun 1 → Jun 22) spans three weeks; the rest are roughly weekly.</p>
+    <p class="section-sub" id="trend-sub"></p>
     <div class="chart-card">
       <div class="legend" id="trend-legend"></div>
       <svg id="trend-svg" width="100%" viewBox="0 0 900 300" style="overflow: visible;"></svg>
     </div>
   </section>
 
-  <footer>
-    Source: weekly BAS commitment (RP0233BS) and expenditure control (RP0203BS) exports for Office of the Premier, parsed and reconciled from raw mainframe dumps. Reconciliation matched 574 of 575 item/week figures exactly between the two independently-generated reports; the one remaining gap (INTERGRATED YOUTH DEVELO — SUPPP catering, R58,410, week of 2026-07-06) has no corresponding vendor/order detail anywhere in that week's ledger.
+  <footer id="footer-text">
+    Source: weekly BAS commitment (RP0233BS) and expenditure control (RP0203BS) exports for Office of the Premier, parsed and reconciled from raw mainframe dumps.
   </footer>
 </div>
 
@@ -235,6 +235,44 @@ function moveTooltip(evt) {
 }
 function hideTooltip() { tooltip.classList.remove('show'); }
 
+// ---- dynamic prose (header, captions, footer) ----
+// Built from DATA rather than hardcoded so a re-run with a different
+// number of weeks, date range, or reconciliation result stays accurate
+// without anyone needing to hand-edit this template.
+const latestDate = DATA.dates[DATA.dates.length - 1];
+const numWeeks = DATA.dates.length;
+
+document.getElementById('header-sub').textContent =
+  `${numWeeks} weekly commitment (GRV/vendor ledger) and expenditure control reports, reconciled item-by-item and rolled up by vendor and responsibility unit. Covers ${DATA.dates[0]} through ${latestDate}.`;
+
+document.getElementById('recon-summary').textContent =
+  `all figures are independently reconciled to zero variance (${DATA.reconciliation_matched} of ${DATA.reconciliation_total} item/week comparisons between the two report types match exactly).`;
+
+document.getElementById('vendor-sub').textContent =
+  `Unpaid GRV/order balances by vendor, latest snapshot (${latestDate}), with the ${numWeeks}-week trend.`;
+
+document.getElementById('vendor-legend-label').textContent = `Outstanding balance, ${latestDate} (excl. SITA)`;
+
+document.getElementById('budget-sub').textContent =
+  `Share of each unit's annual budget already spent or committed, latest snapshot (${latestDate}). Sorted highest first.`;
+
+document.getElementById('trend-sub').textContent =
+  `Percent of budget spent + committed, tracked across all ${numWeeks} snapshots. Point spacing on the x-axis reflects actual elapsed time between reports, not report sequence -- see exact dates on the axis.`;
+
+(function() {
+  const footerEl = document.getElementById('footer-text');
+  let gapText;
+  if (DATA.reconciliation_gaps.length === 0) {
+    gapText = `Reconciliation matched all ${DATA.reconciliation_total} item/week figures exactly between the two independently-generated reports.`;
+  } else {
+    const gapDescs = DATA.reconciliation_gaps.map(g =>
+      `${g.resp2_desc} ${g.item_desc} (${fmtR(Math.abs(g.variance))}, week of ${g.report_date})`
+    ).join('; ');
+    gapText = `Reconciliation matched ${DATA.reconciliation_matched} of ${DATA.reconciliation_total} item/week figures exactly between the two independently-generated reports; the remaining gap(s) with no corresponding vendor/order detail: ${gapDescs}.`;
+  }
+  footerEl.textContent = footerEl.textContent.trim() + ' ' + gapText;
+})();
+
 // ---- stat tiles ----
 const tileRow = document.getElementById('tile-row');
 const tiles = [
@@ -253,12 +291,20 @@ tiles.forEach(t => {
 });
 
 // ---- SITA hero ----
+const provincialIct = DATA.dept_ranking.find(d => d.dept === 'PROVINCIAL ICT');
+const ictBudgetPhrase = provincialIct ? `Provincial ICT's ${fmtR(provincialIct.budget, {compact:true})} budget line` : "Provincial ICT's budget line";
+let sitaTrendPhrase = 'holding steady';
+if (DATA.sita_first_balance != null && DATA.sita_first_balance !== DATA.sita_balance) {
+  sitaTrendPhrase = DATA.sita_first_balance > DATA.sita_balance
+    ? `slowly declining (${fmtR(DATA.sita_first_balance, {compact:true})} → ${fmtR(DATA.sita_balance, {compact:true})} since ${DATA.sita_first_date}, over the observed period)`
+    : `slowly growing (${fmtR(DATA.sita_first_balance, {compact:true})} → ${fmtR(DATA.sita_balance, {compact:true})} since ${DATA.sita_first_date}, over the observed period)`;
+}
 document.getElementById('sita-hero').append(
   el('div', {class:'hero-figure'}, [fmtR(DATA.sita_balance, {compact:true})]),
   el('div', {class:'hero-text'}, [
     (function(){
       const d = document.createElement('span');
-      d.innerHTML = '<b>State Information Technology Agency (SITA)</b> — ICT infrastructure and data-line services — accounts for <b>' + DATA.sita_pct_of_total + '%</b> of every rand this department currently owes vendors. It is excluded from the chart below so the remaining vendors stay legible; its balance sits within Provincial ICT\'s R744.7M budget line and has been slowly declining (R398.3M → R374.9M over the observed period) but remains, by a wide margin, the department\'s largest single financial exposure.';
+      d.innerHTML = '<b>State Information Technology Agency (SITA)</b> — ICT infrastructure and data-line services — accounts for <b>' + DATA.sita_pct_of_total + '%</b> of every rand this department currently owes vendors. It is excluded from the chart below so the remaining vendors stay legible; its balance sits within ' + ictBudgetPhrase + ' and has been ' + sitaTrendPhrase + ' but remains, by a wide margin, the department\'s largest single financial exposure.';
       return d;
     })()
   ])

@@ -10,18 +10,20 @@ RAW_DIR = os.path.join(os.path.dirname(__file__), '..', 'data', 'raw')
 
 
 class TestParseExpenditurePdfIntegration(unittest.TestCase):
-    """Pin known-good outputs for every real weekly export. These five files
+    """Pin known-good outputs for every real weekly export. These files
     exercise every quirk found so far: standard 'R 003'/'R 004' headers,
     compressed 'R3'/'R4' headers with no space or zero-padding, dash-fill
     corruption on TOTAL lines, and both leading- and trailing-sign negative
     amounts. A future change breaking any of these shows up here."""
 
     cases = [
+        ('EXP19.05.26.pdf', '2026-05-19', 934),
+        ('EXPENDITURE REPORT 01.06.2026.pdf', '2026-06-01', 936),
+        ('EXP15.06.26.pdf', '2026-06-15', 938),
         ('EXP22.06.26.pdf', '2026-06-22', 938),
         ('EX29.06.26.pdf', '2026-06-29', 938),
         ('EXP06.07.26.pdf', '2026-07-06', 938),
         ('EXP.13.07.2026.pdf', '2026-07-13', 937),
-        ('EXPENDITURE REPORT 01.06.2026.pdf', '2026-06-01', 936),
     ]
 
     def test_all_weeks_parse_cleanly(self):
