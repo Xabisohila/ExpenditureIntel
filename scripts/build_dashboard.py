@@ -8,11 +8,10 @@ PROCESSED_DIR = os.path.join(os.path.dirname(__file__), '..', 'data', 'processed
 TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), 'dashboard_template.html')
 OUTPUT_PATH = os.path.join(PROCESSED_DIR, 'dashboard.html')
 
-# Vendors/departments named directly in the template's prose (SITA callout,
-# footer, trend chart) rather than driven purely by rank, so a re-run with
-# new data still reads correctly only if these stay the largest.
+# Named directly in the template's prose (SITA callout) rather than driven
+# purely by rank, so a re-run with new data still reads correctly only if
+# this stays the largest vendor.
 SITA_VENDOR = 'STATE INFORMATION TEC'
-TOP_DEPT_NAMES = ['INTERGRATED YOUTH DEVELOPMENT', 'PROVINCIAL ICT', 'FINANCIAL MANAGEMENT']
 
 
 def read_csv(path):
@@ -20,46 +19,58 @@ def read_csv(path):
         return list(csv.DictReader(f))
 
 
-def build_vendor_data(vendor_trend_rows, dates, latest):
-    vendor_by_week = defaultdict(lambda: defaultdict(float))
-    for r in vendor_trend_rows:
-        vendor_by_week[r['vendor']][r['report_date']] += float(r['commitments_balance'])
+def build_vendor_records(commitment_rows, dates):
+    """Per (vendor, resp1_desc) pair, the full weekly balance series -- the
+    portion of that vendor's balance specifically attributable to that
+    department, not the vendor's cross-department total. This lets the
+    dashboard filter vendor exposure down to a single department without
+    losing the ability to also show the all-departments view (sum across
+    every resp1 a vendor appears under)."""
+    agg = defaultdict(lambda: defaultdict(float))
+    for r in commitment_rows:
+        vendor = r['vendor']
+        if not vendor:
+            continue
+        key = (vendor, r['resp1_desc'] or '(unknown)')
+        agg[key][r['report_date']] += float(r['commitments_balance'])
 
-    vendor_latest = sorted(
-        ((v, wk.get(latest, 0.0)) for v, wk in vendor_by_week.items() if wk.get(latest, 0.0) > 0),
-        key=lambda x: -x[1],
-    )
-    total_outstanding = sum(b for _, b in vendor_latest)
-    sita_balance = vendor_by_week[SITA_VENDOR][latest]
-    sita_first_date = next((d for d in dates if vendor_by_week[SITA_VENDOR].get(d, 0.0) > 0), None)
-    sita_first_balance = vendor_by_week[SITA_VENDOR].get(sita_first_date, 0.0) if sita_first_date else None
+    records = []
+    for (vendor, resp1), by_date in agg.items():
+        series = [round(by_date.get(d, 0.0), 2) for d in dates]
+        if any(v != 0 for v in series):
+            records.append({'vendor': vendor, 'resp1': resp1, 'series': series})
+    return records
 
-    top_excl_sita = [(v, b) for v, b in vendor_latest if v != SITA_VENDOR][:10]
-    top_vendors_excl_sita = [
-        {'vendor': v, 'balance': round(b, 2), 'series': [round(vendor_by_week[v].get(d, 0.0), 2) for d in dates]}
-        for v, b in top_excl_sita
-    ]
 
-    flat_vendors = []
-    for v, wk in vendor_by_week.items():
-        present = [d for d in dates if d in wk and wk[d] != 0]
-        if len(present) >= 3:
-            vals = [wk[d] for d in present]
-            if len(set(round(x, 2) for x in vals)) == 1:
-                flat_vendors.append({'vendor': v, 'balance': round(vals[0], 2), 'weeks_flat': len(present)})
-    flat_vendors.sort(key=lambda x: -x['balance'])
+def build_dept_series(expenditure_rows, dates):
+    """Per department, the full weekly [expenses, commitments, budget,
+    available_budget, pct] series -- every week, every department, so the
+    dashboard can filter/highlight any one of them at any past snapshot
+    instead of only ever showing the latest week's ranking."""
+    agg = defaultdict(lambda: defaultdict(lambda: [0.0, 0.0, 0.0, 0.0]))
+    for r in expenditure_rows:
+        resp1 = r['resp1_desc']
+        if not resp1:
+            continue
+        d = agg[resp1][r['report_date']]
+        d[0] += float(r['expenses'])
+        d[1] += float(r['commitments'])
+        d[2] += float(r['budget'])
+        d[3] += float(r['available_budget'])
 
-    return {
-        'total_outstanding': round(total_outstanding, 2),
-        'sita_balance': round(sita_balance, 2),
-        'sita_pct_of_total': round(sita_balance / total_outstanding * 100, 1) if total_outstanding else 0.0,
-        'sita_first_balance': round(sita_first_balance, 2) if sita_first_balance is not None else None,
-        'sita_first_date': sita_first_date,
-        'num_vendors_outstanding': len(vendor_latest),
-        'num_flat_vendors': len(flat_vendors),
-        'top_vendors_excl_sita': top_vendors_excl_sita,
-        'flat_vendors': flat_vendors,
-    }
+    dept_series = {}
+    for resp1, byweek in agg.items():
+        series = []
+        for d in dates:
+            if d in byweek:
+                exp, com, bud, avail = byweek[d]
+                pct = round((exp + com) / bud * 100, 1) if bud else None
+                series.append({'expenses': round(exp, 2), 'commitments': round(com, 2),
+                                'budget': round(bud, 2), 'available': round(avail, 2), 'pct': pct})
+            else:
+                series.append({'expenses': None, 'commitments': None, 'budget': None, 'available': None, 'pct': None})
+        dept_series[resp1] = series
+    return dept_series
 
 
 def build_reconciliation_data(item_recon_rows):
@@ -83,63 +94,24 @@ def build_reconciliation_data(item_recon_rows):
     }
 
 
-def build_budget_data(expenditure_rows, dates, latest):
-    agg = defaultdict(lambda: defaultdict(lambda: [0.0, 0.0, 0.0, 0.0]))  # resp1 -> date -> [expenses, commitments, budget, available]
-    for r in expenditure_rows:
-        resp1 = r['resp1_desc']
-        if not resp1:
-            continue
-        d = agg[resp1][r['report_date']]
-        d[0] += float(r['expenses'])
-        d[1] += float(r['commitments'])
-        d[2] += float(r['budget'])
-        d[3] += float(r['available_budget'])
-
-    ranked = []
-    for resp1, byweek in agg.items():
-        if latest not in byweek:
-            continue
-        exp, com, bud, avail = byweek[latest]
-        if bud <= 0:
-            continue
-        ranked.append({
-            'dept': resp1, 'pct': round((exp + com) / bud * 100, 1),
-            'budget': round(bud, 2), 'available': round(avail, 2),
-            'expenses': round(exp, 2), 'commitments': round(com, 2),
-        })
-    ranked.sort(key=lambda x: -x['pct'])
-
-    top_dept_series = {}
-    for name in TOP_DEPT_NAMES:
-        series = []
-        for dt in dates:
-            if dt in agg[name]:
-                exp, com, bud, avail = agg[name][dt]
-                series.append(round((exp + com) / bud * 100, 1) if bud else None)
-            else:
-                series.append(None)
-        top_dept_series[name] = series
-
-    return {
-        'num_depts_over_50pct': sum(1 for r in ranked if r['pct'] >= 50),
-        'num_depts_total': len(ranked),
-        'dept_ranking': ranked,
-        'top_dept_series': top_dept_series,
-        'top_dept_names': TOP_DEPT_NAMES,
-    }
-
-
 def main():
-    vendor_trend_rows = read_csv(os.path.join(PROCESSED_DIR, 'vendor_weekly_trend.csv'))
+    commitment_rows = read_csv(os.path.join(PROCESSED_DIR, 'commitments.csv'))
     expenditure_rows = read_csv(os.path.join(PROCESSED_DIR, 'expenditure.csv'))
     item_recon_rows = read_csv(os.path.join(PROCESSED_DIR, 'reconciliation_item_level.csv'))
 
-    dates = sorted(set(r['report_date'] for r in vendor_trend_rows))
-    latest = dates[-1]
+    dates = sorted(set(r['report_date'] for r in commitment_rows) | set(r['report_date'] for r in expenditure_rows))
 
-    data = {'dates': dates}
-    data.update(build_vendor_data(vendor_trend_rows, dates, latest))
-    data.update(build_budget_data(expenditure_rows, dates, latest))
+    vendor_records = build_vendor_records(commitment_rows, dates)
+    dept_series = build_dept_series(expenditure_rows, dates)
+    dept_list = sorted(dept_series.keys())
+
+    data = {
+        'dates': dates,
+        'sita_vendor': SITA_VENDOR,
+        'dept_list': dept_list,
+        'dept_series': dept_series,
+        'vendor_records': vendor_records,
+    }
     data.update(build_reconciliation_data(item_recon_rows))
 
     json_str = json.dumps(data)
@@ -156,9 +128,9 @@ def main():
 
     with open(OUTPUT_PATH, 'w', encoding='utf-8') as f:
         f.write(html)
+    num_vendor_records = len(vendor_records)
     print(f"wrote {OUTPUT_PATH}")
-    print(f"  {data['num_vendors_outstanding']} vendors with outstanding balances, {data['num_flat_vendors']} stale")
-    print(f"  {data['num_depts_total']} responsibility units, {data['num_depts_over_50pct']} over 50% of budget committed")
+    print(f"  {len(dept_list)} responsibility units, {num_vendor_records} vendor/department records across {len(dates)} weeks")
 
     return data
 

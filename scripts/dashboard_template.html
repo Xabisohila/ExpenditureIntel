@@ -152,6 +152,24 @@
   .tooltip.show { opacity: 1; }
 
   footer { font-size: 11.5px; color: var(--text-muted); border-top: 1px solid var(--gridline); padding-top: 14px; line-height: 1.6; }
+
+  .filter-row {
+    display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-end;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 16px; margin-bottom: 28px;
+  }
+  .filter-field { display: flex; flex-direction: column; gap: 4px; }
+  .filter-field label { font-size: 11.5px; color: var(--text-secondary); font-weight: 600; }
+  .filter-field select {
+    font: inherit; font-size: 13px; color: var(--text-primary); background: var(--page-plane);
+    border: 1px solid var(--baseline); border-radius: 6px; padding: 6px 10px; min-width: 220px;
+  }
+  .filter-reset {
+    font-size: 12px; color: var(--series-1); background: none; border: none; cursor: pointer;
+    padding: 6px 4px; text-decoration: underline;
+  }
+  .bar-row.dimmed { opacity: 0.35; }
+  .bar-row.highlighted .bar-label { font-weight: 700; color: var(--series-1); }
 </style>
 </head>
 <body>
@@ -162,6 +180,18 @@
     <p id="header-sub"></p>
     <div class="caveat">⚠ Data quality note: the 2026-06-01 expenditure PDF has a corrupted embedded font encoding, which dropped the responsibility-unit header line entirely — <b>all 936 rows</b> for that date, not just a few, were missing it. Since a sub-unit belongs to exactly one responsibility unit as a structural fact (confirmed with zero conflicts across every other week, in both this report and the commitment ledger), every one of those 936 rows was safely backfilled from that mapping rather than estimated — the trend chart below reflects the real 2026-06-01 values, not an interpolation. Separately, <span id="recon-summary"></span></div>
   </header>
+
+  <div class="filter-row">
+    <div class="filter-field">
+      <label for="dept-filter">Responsibility unit</label>
+      <select id="dept-filter"><option value="ALL">All departments</option></select>
+    </div>
+    <div class="filter-field">
+      <label for="week-filter">Snapshot week</label>
+      <select id="week-filter"></select>
+    </div>
+    <button class="filter-reset" id="filter-reset" type="button">Reset filters</button>
+  </div>
 
   <section id="stats">
     <div class="tile-row" id="tile-row"></div>
@@ -197,11 +227,14 @@
   </section>
 
   <section id="trend">
-    <h2>Spend trajectory — top 3 units</h2>
+    <h2 id="trend-heading">Spend trajectory</h2>
     <p class="section-sub" id="trend-sub"></p>
     <div class="chart-card">
       <div class="legend" id="trend-legend"></div>
-      <svg id="trend-svg" width="100%" viewBox="0 0 900 300" style="overflow: visible;"></svg>
+      <svg id="trend-svg" width="100%" viewBox="0 0 900 300" style="overflow: visible;">
+        <g id="trend-static"></g>
+        <g id="trend-dynamic"></g>
+      </svg>
     </div>
   </section>
 
@@ -230,6 +263,8 @@ function el(tag, attrs, children) {
   return e;
 }
 
+function clearChildren(node) { while (node.firstChild) node.removeChild(node.firstChild); }
+
 const tooltip = document.getElementById('tooltip');
 function showTooltip(evt, html) {
   tooltip.innerHTML = html;
@@ -242,29 +277,79 @@ function moveTooltip(evt) {
 }
 function hideTooltip() { tooltip.classList.remove('show'); }
 
-// ---- dynamic prose (header, captions, footer) ----
-// Built from DATA rather than hardcoded so a re-run with a different
-// number of weeks, date range, or reconciliation result stays accurate
-// without anyone needing to hand-edit this template.
 const latestDate = DATA.dates[DATA.dates.length - 1];
 const numWeeks = DATA.dates.length;
 
+// ---- filter state + controls ----
+// vendor_records/dept_series carry every week for every vendor/department
+// (not just the latest snapshot), so all of this is recomputed client-side
+// per filter change rather than baked in at build time.
+const state = { dept: 'ALL', weekIndex: numWeeks - 1 };
+
+const deptFilterEl = document.getElementById('dept-filter');
+DATA.dept_list.forEach(d => deptFilterEl.appendChild(el('option', {value: d}, [d])));
+
+const weekFilterEl = document.getElementById('week-filter');
+DATA.dates.forEach((d, i) => {
+  weekFilterEl.appendChild(el('option', {value: String(i)}, [d + (i === numWeeks - 1 ? ' (latest)' : '')]));
+});
+weekFilterEl.value = String(state.weekIndex);
+
+deptFilterEl.addEventListener('change', () => { state.dept = deptFilterEl.value; render(); });
+weekFilterEl.addEventListener('change', () => { state.weekIndex = parseInt(weekFilterEl.value, 10); render(); });
+document.getElementById('filter-reset').addEventListener('click', () => {
+  state.dept = 'ALL'; state.weekIndex = numWeeks - 1;
+  deptFilterEl.value = 'ALL'; weekFilterEl.value = String(state.weekIndex);
+  render();
+});
+
+// ---- computation helpers (mirror src/delta.py's streak logic in JS so the
+// dashboard can recompute "stale" as of any selected week, not just the
+// latest one that build_dashboard.py precomputes) ----
+function vendorTotalsAt(deptFilter, weekIndex) {
+  const totals = new Map();
+  for (const rec of DATA.vendor_records) {
+    if (deptFilter !== 'ALL' && rec.resp1 !== deptFilter) continue;
+    const bal = rec.series[weekIndex] || 0;
+    totals.set(rec.vendor, (totals.get(rec.vendor) || 0) + bal);
+  }
+  return totals;
+}
+
+function vendorFullSeries(deptFilter) {
+  const seriesMap = new Map();
+  for (const rec of DATA.vendor_records) {
+    if (deptFilter !== 'ALL' && rec.resp1 !== deptFilter) continue;
+    if (!seriesMap.has(rec.vendor)) seriesMap.set(rec.vendor, DATA.dates.map(() => 0));
+    const arr = seriesMap.get(rec.vendor);
+    rec.series.forEach((v, i) => { arr[i] += v; });
+  }
+  return seriesMap;
+}
+
+function streakEndingAt(series, uptoIndex) {
+  let streak = 0, prevVal = null;
+  for (let i = 0; i <= uptoIndex; i++) {
+    const val = series[i];
+    if (!val) { streak = 0; prevVal = null; }
+    else if (prevVal !== null && val === prevVal) { streak += 1; }
+    else { streak = 1; prevVal = val; }
+  }
+  return streak;
+}
+
+function deptPctAt(dept, weekIndex) {
+  const rec = DATA.dept_series[dept] && DATA.dept_series[dept][weekIndex];
+  return rec ? rec.pct : null;
+}
+
+// ---- static prose (doesn't change with filters -- global facts about the
+// dataset as a whole) ----
 document.getElementById('header-sub').textContent =
   `${numWeeks} weekly commitment (GRV/vendor ledger) and expenditure control reports, reconciled item-by-item and rolled up by vendor and responsibility unit. Covers ${DATA.dates[0]} through ${latestDate}.`;
 
 document.getElementById('recon-summary').textContent =
   `all figures are independently reconciled to zero variance (${DATA.reconciliation_matched} of ${DATA.reconciliation_total} item/week comparisons between the two report types match exactly).`;
-
-document.getElementById('vendor-sub').textContent =
-  `Unpaid GRV/order balances by vendor, latest snapshot (${latestDate}), with the ${numWeeks}-week trend.`;
-
-document.getElementById('vendor-legend-label').textContent = `Outstanding balance, ${latestDate} (excl. SITA)`;
-
-document.getElementById('budget-sub').textContent =
-  `Share of each unit's annual budget already spent or committed, latest snapshot (${latestDate}). Sorted highest first.`;
-
-document.getElementById('trend-sub').textContent =
-  `Percent of budget spent + committed, tracked across all ${numWeeks} snapshots. Point spacing on the x-axis reflects actual elapsed time between reports, not report sequence -- see exact dates on the axis.`;
 
 (function() {
   const footerEl = document.getElementById('footer-text');
@@ -280,184 +365,342 @@ document.getElementById('trend-sub').textContent =
   footerEl.textContent = footerEl.textContent.trim() + ' ' + gapText;
 })();
 
-// ---- stat tiles ----
-const tileRow = document.getElementById('tile-row');
-const tiles = [
-  {label: 'Total outstanding commitments', value: fmtR(DATA.total_outstanding, {compact:true}), sub: 'across ' + DATA.num_vendors_outstanding + ' vendors, week of 2026-07-13'},
-  {label: 'Single largest vendor share', value: DATA.sita_pct_of_total + '%', sub: 'State Information Technology Agency alone', critical: true},
-  {label: 'Vendors with stale balances', value: DATA.num_flat_vendors, sub: 'unchanged for 3+ consecutive snapshots'},
-  {label: 'Units over 50% committed', value: DATA.num_depts_over_50pct + ' of ' + DATA.num_depts_total, sub: 'share of FY budget spent + committed'},
-];
-tiles.forEach(t => {
-  const tile = el('div', {class: 'tile' + (t.critical ? ' tile-critical' : '')}, [
-    el('div', {class:'tile-label'}, [t.label]),
-    el('div', {class:'tile-value'}, [String(t.value)]),
-    el('div', {class:'tile-sub'}, [t.sub]),
-  ]);
-  tileRow.appendChild(tile);
-});
+// ---- per-section renderers, each re-run on every filter change ----
 
-// ---- SITA hero ----
-const provincialIct = DATA.dept_ranking.find(d => d.dept === 'PROVINCIAL ICT');
-const ictBudgetPhrase = provincialIct ? `Provincial ICT's ${fmtR(provincialIct.budget, {compact:true})} budget line` : "Provincial ICT's budget line";
-let sitaTrendPhrase = 'holding steady';
-if (DATA.sita_first_balance != null && DATA.sita_first_balance !== DATA.sita_balance) {
-  sitaTrendPhrase = DATA.sita_first_balance > DATA.sita_balance
-    ? `slowly declining (${fmtR(DATA.sita_first_balance, {compact:true})} → ${fmtR(DATA.sita_balance, {compact:true})} since ${DATA.sita_first_date}, over the observed period)`
-    : `slowly growing (${fmtR(DATA.sita_first_balance, {compact:true})} → ${fmtR(DATA.sita_balance, {compact:true})} since ${DATA.sita_first_date}, over the observed period)`;
+function renderScopedProse() {
+  const deptFilter = state.dept, weekIndex = state.weekIndex, date = DATA.dates[weekIndex];
+  const scopeSuffix = deptFilter === 'ALL' ? '' : ` for ${deptFilter}`;
+  document.getElementById('vendor-sub').textContent =
+    `Unpaid GRV/order balances by vendor${scopeSuffix}, ${date} snapshot, with the ${numWeeks}-week trend.`;
+  document.getElementById('vendor-legend-label').textContent = `Outstanding balance, ${date} (excl. SITA)`;
+  document.getElementById('budget-sub').textContent =
+    `Share of each unit's annual budget already spent or committed, ${date} snapshot. Sorted highest first.` +
+    (deptFilter === 'ALL' ? '' : ` ${deptFilter} is highlighted.`);
+  document.getElementById('trend-sub').textContent =
+    `Percent of budget spent + committed, tracked across all ${numWeeks} snapshots. Point spacing on the x-axis reflects actual elapsed time between reports, not report sequence -- see exact dates on the axis.`;
+  document.getElementById('trend-heading').textContent =
+    deptFilter === 'ALL' ? 'Spend trajectory — top 3 units' : `Spend trajectory — ${deptFilter}`;
 }
-document.getElementById('sita-hero').append(
-  el('div', {class:'hero-figure'}, [fmtR(DATA.sita_balance, {compact:true})]),
-  el('div', {class:'hero-text'}, [
-    (function(){
-      const d = document.createElement('span');
-      d.innerHTML = '<b>State Information Technology Agency (SITA)</b> — ICT infrastructure and data-line services — accounts for <b>' + DATA.sita_pct_of_total + '%</b> of every rand this department currently owes vendors. It is excluded from the chart below so the remaining vendors stay legible; its balance sits within ' + ictBudgetPhrase + ' and has been ' + sitaTrendPhrase + ' but remains, by a wide margin, the department\'s largest single financial exposure.';
-      return d;
-    })()
-  ])
-);
 
-// ---- vendor bar chart (excl SITA) ----
-const vendorBars = document.getElementById('vendor-bars');
-const maxVendorBal = Math.max(...DATA.top_vendors_excl_sita.map(v => v.balance));
-DATA.top_vendors_excl_sita.forEach(v => {
-  const pct = (v.balance / maxVendorBal) * 100;
-  const track = el('div', {class:'bar-track'});
-  const fill = el('div', {class:'bar-fill', style:`width:${pct}%; background: var(--seq-400);`});
-  track.appendChild(fill);
-  const row = el('div', {class:'bar-row hoverable'}, [
-    el('div', {class:'bar-label', title: v.vendor}, [v.vendor]),
-    track,
-    el('div', {class:'bar-value'}, [fmtR(v.balance, {compact:true})]),
-  ]);
-  row.addEventListener('mousemove', (evt) => {
-    const seriesHtml = DATA.dates.map((d,i) => `${d}: ${fmtR(v.series[i])}`).join('<br>');
-    showTooltip(evt, `<b>${v.vendor}</b><br>${seriesHtml}`);
+function renderTiles() {
+  const tileRow = document.getElementById('tile-row');
+  clearChildren(tileRow);
+  const { dept: deptFilter, weekIndex } = state;
+
+  const vendorTotals = vendorTotalsAt(deptFilter, weekIndex);
+  const vendorSeries = vendorFullSeries(deptFilter);
+  const positive = [...vendorTotals.entries()].filter(([, b]) => b > 0);
+  const totalOutstanding = positive.reduce((s, [, b]) => s + b, 0);
+  const sitaBalance = vendorTotals.get(DATA.sita_vendor) || 0;
+  const sitaPct = totalOutstanding ? (sitaBalance / totalOutstanding * 100) : 0;
+
+  let numFlat = 0;
+  for (const series of vendorSeries.values()) {
+    if (!series[weekIndex]) continue;
+    if (streakEndingAt(series, weekIndex) >= 3) numFlat++;
+  }
+
+  let deptTile;
+  if (deptFilter === 'ALL') {
+    const pcts = DATA.dept_list.map(d => deptPctAt(d, weekIndex)).filter(p => p !== null);
+    const over50 = pcts.filter(p => p >= 50).length;
+    deptTile = {label: 'Units over 50% committed', value: `${over50} of ${pcts.length}`, sub: 'share of FY budget spent + committed'};
+  } else {
+    const pct = deptPctAt(deptFilter, weekIndex);
+    deptTile = {label: deptFilter, value: pct !== null ? pct + '%' : 'n/a', sub: 'share of FY budget spent + committed'};
+  }
+
+  const tiles = [
+    {label: 'Total outstanding commitments', value: fmtR(totalOutstanding, {compact:true}), sub: `across ${positive.length} vendors, week of ${DATA.dates[weekIndex]}`},
+    {label: 'Single largest vendor share', value: sitaPct.toFixed(1) + '%',
+     sub: deptFilter === 'ALL' ? 'State Information Technology Agency, of total' : `SITA's share within ${deptFilter}`, critical: true},
+    {label: 'Vendors with stale balances', value: numFlat, sub: 'unchanged for 3+ consecutive snapshots up to selected week'},
+    deptTile,
+  ];
+  tiles.forEach(t => {
+    tileRow.appendChild(el('div', {class: 'tile' + (t.critical ? ' tile-critical' : '')}, [
+      el('div', {class:'tile-label'}, [t.label]),
+      el('div', {class:'tile-value'}, [String(t.value)]),
+      el('div', {class:'tile-sub'}, [t.sub]),
+    ]));
   });
-  row.addEventListener('mouseleave', hideTooltip);
-  vendorBars.appendChild(row);
-});
+}
 
-// ---- stale vendors table ----
-const staleBody = document.getElementById('stale-tbody');
-DATA.flat_vendors.forEach(v => {
-  const chipClass = v.weeks_flat >= 5 ? 'critical' : (v.weeks_flat >= 4 ? 'warning' : 'good');
-  const chipLabel = v.weeks_flat >= 5 ? 'Unchanged entire period' : (v.weeks_flat >= 4 ? 'Long-stale' : 'Stale');
-  const row = el('tr', {}, [
-    el('td', {}, [v.vendor]),
-    el('td', {class:'num'}, [fmtR(v.balance)]),
-    el('td', {class:'num'}, [String(v.weeks_flat)]),
-    el('td', {}, [el('span', {class:'status-chip ' + chipClass}, ['● ' + chipLabel])]),
-  ]);
-  staleBody.appendChild(row);
-});
+function renderSitaHero() {
+  const heroEl = document.getElementById('sita-hero');
+  clearChildren(heroEl);
+  const { dept: deptFilter, weekIndex } = state;
 
-// ---- department budget bars ----
-const deptBars = document.getElementById('dept-bars');
-DATA.dept_ranking.forEach(d => {
-  const statusClass = d.pct >= 75 ? 'critical' : (d.pct >= 50 ? 'warning' : 'good');
-  const barColor = d.pct >= 75 ? 'var(--status-critical)' : (d.pct >= 50 ? 'var(--status-warning)' : 'var(--status-good)');
-  const track = el('div', {class:'bar-track'});
-  const fill = el('div', {class:'bar-fill', style:`width:${Math.min(d.pct,100)}%; background:${barColor};`});
-  track.appendChild(fill);
-  const row = el('div', {class:'bar-row hoverable'}, [
-    el('div', {class:'bar-label', title: d.dept}, [d.dept]),
-    track,
-    el('div', {class:'bar-value'}, [d.pct + '%']),
-  ]);
-  row.addEventListener('mousemove', (evt) => {
-    showTooltip(evt, `<b>${d.dept}</b><br>Budget: ${fmtR(d.budget)}<br>Expenses: ${fmtR(d.expenses)}<br>Commitments: ${fmtR(d.commitments)}<br>Available: ${fmtR(d.available)}`);
+  const vendorTotals = vendorTotalsAt(deptFilter, weekIndex);
+  const vendorSeries = vendorFullSeries(deptFilter);
+  const sitaBalance = vendorTotals.get(DATA.sita_vendor) || 0;
+
+  if (sitaBalance <= 0) {
+    heroEl.appendChild(el('div', {class:'hero-text'}, [
+      `State Information Technology Agency (SITA) has no outstanding balance under ${deptFilter === 'ALL' ? 'the current scope' : deptFilter} as of ${DATA.dates[weekIndex]}.`
+    ]));
+    return;
+  }
+
+  const totalOutstanding = [...vendorTotals.values()].filter(b => b > 0).reduce((s, b) => s + b, 0);
+  const sitaPct = totalOutstanding ? (sitaBalance / totalOutstanding * 100) : 0;
+  const sitaSeries = vendorSeries.get(DATA.sita_vendor) || DATA.dates.map(() => 0);
+  const sitaFirstIdx = sitaSeries.findIndex(v => v > 0);
+
+  const budgetDeptName = deptFilter !== 'ALL' ? deptFilter : 'PROVINCIAL ICT';
+  const budgetRec = DATA.dept_series[budgetDeptName] ? DATA.dept_series[budgetDeptName][numWeeks - 1] : null;
+  const budgetPhrase = budgetRec && budgetRec.budget
+    ? `${budgetDeptName}'s ${fmtR(budgetRec.budget, {compact:true})} budget line`
+    : `${budgetDeptName}'s budget line`;
+
+  let trendPhrase = 'holding steady';
+  if (sitaFirstIdx >= 0 && sitaFirstIdx < weekIndex && sitaSeries[sitaFirstIdx] !== sitaSeries[weekIndex]) {
+    const firstVal = sitaSeries[sitaFirstIdx];
+    trendPhrase = firstVal > sitaSeries[weekIndex]
+      ? `slowly declining (${fmtR(firstVal, {compact:true})} → ${fmtR(sitaSeries[weekIndex], {compact:true})} since ${DATA.dates[sitaFirstIdx]})`
+      : `slowly growing (${fmtR(firstVal, {compact:true})} → ${fmtR(sitaSeries[weekIndex], {compact:true})} since ${DATA.dates[sitaFirstIdx]})`;
+  }
+
+  const scopePhrase = deptFilter === 'ALL' ? 'this department' : deptFilter;
+  const exclusionPhrase = deptFilter === 'ALL' ? ' (excluded from the chart below so the remaining vendors stay legible)' : '';
+
+  heroEl.append(
+    el('div', {class:'hero-figure'}, [fmtR(sitaBalance, {compact:true})]),
+    el('div', {class:'hero-text'}, [
+      (function() {
+        const span = document.createElement('span');
+        span.innerHTML = '<b>State Information Technology Agency (SITA)</b> — ICT infrastructure and data-line services — accounts for <b>'
+          + sitaPct.toFixed(1) + '%</b> of every rand ' + scopePhrase + ' currently owes vendors' + exclusionPhrase
+          + '; its balance sits within ' + budgetPhrase + ' and has been ' + trendPhrase + '.';
+        return span;
+      })()
+    ])
+  );
+}
+
+function renderVendorBars() {
+  const vendorBars = document.getElementById('vendor-bars');
+  clearChildren(vendorBars);
+  const { dept: deptFilter, weekIndex } = state;
+
+  const totals = vendorTotalsAt(deptFilter, weekIndex);
+  const vendorSeries = vendorFullSeries(deptFilter);
+  const rows = [...totals.entries()]
+    .filter(([v, b]) => b > 0 && v !== DATA.sita_vendor)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10);
+
+  if (rows.length === 0) {
+    vendorBars.appendChild(el('div', {class:'bar-row'}, ['No outstanding vendor balances in this scope.']));
+    return;
+  }
+
+  const maxBal = rows[0][1];
+  rows.forEach(([vendor, balance]) => {
+    const pct = (balance / maxBal) * 100;
+    const track = el('div', {class:'bar-track'});
+    track.appendChild(el('div', {class:'bar-fill', style:`width:${pct}%; background: var(--seq-400);`}));
+    const row = el('div', {class:'bar-row hoverable'}, [
+      el('div', {class:'bar-label', title: vendor}, [vendor]),
+      track,
+      el('div', {class:'bar-value'}, [fmtR(balance, {compact:true})]),
+    ]);
+    const series = vendorSeries.get(vendor);
+    row.addEventListener('mousemove', (evt) => {
+      const seriesHtml = DATA.dates.map((d, i) => `${d}: ${fmtR(series[i])}`).join('<br>');
+      showTooltip(evt, `<b>${vendor}</b><br>${seriesHtml}`);
+    });
+    row.addEventListener('mouseleave', hideTooltip);
+    vendorBars.appendChild(row);
   });
-  row.addEventListener('mouseleave', hideTooltip);
-  deptBars.appendChild(row);
-});
+}
+
+function renderStaleTable() {
+  const staleBody = document.getElementById('stale-tbody');
+  clearChildren(staleBody);
+  const { dept: deptFilter, weekIndex } = state;
+
+  const vendorSeries = vendorFullSeries(deptFilter);
+  const flat = [];
+  for (const [vendor, series] of vendorSeries.entries()) {
+    const bal = series[weekIndex];
+    if (!bal) continue;
+    const streak = streakEndingAt(series, weekIndex);
+    if (streak >= 3) flat.push({ vendor, balance: bal, weeksFlat: streak });
+  }
+  flat.sort((a, b) => b.balance - a.balance);
+
+  if (flat.length === 0) {
+    staleBody.appendChild(el('tr', {}, [el('td', {colspan: '4'}, ['No stale balances in this scope as of the selected week.'])]));
+    return;
+  }
+
+  flat.forEach(v => {
+    const unchangedEntirePeriod = v.weeksFlat === weekIndex + 1;
+    const chipClass = unchangedEntirePeriod ? 'critical' : (v.weeksFlat >= 4 ? 'warning' : 'good');
+    const chipLabel = unchangedEntirePeriod ? 'Unchanged entire period' : (v.weeksFlat >= 4 ? 'Long-stale' : 'Stale');
+    staleBody.appendChild(el('tr', {}, [
+      el('td', {}, [v.vendor]),
+      el('td', {class:'num'}, [fmtR(v.balance)]),
+      el('td', {class:'num'}, [String(v.weeksFlat)]),
+      el('td', {}, [el('span', {class:'status-chip ' + chipClass}, ['● ' + chipLabel])]),
+    ]));
+  });
+}
+
+function renderDeptBars() {
+  const deptBars = document.getElementById('dept-bars');
+  clearChildren(deptBars);
+  const { dept: deptFilter, weekIndex } = state;
+
+  const ranked = DATA.dept_list
+    .map(d => ({ dept: d, ...DATA.dept_series[d][weekIndex] }))
+    .filter(r => r.pct !== null)
+    .sort((a, b) => b.pct - a.pct);
+
+  ranked.forEach(d => {
+    const statusColor = d.pct >= 75 ? 'var(--status-critical)' : (d.pct >= 50 ? 'var(--status-warning)' : 'var(--status-good)');
+    const track = el('div', {class:'bar-track'});
+    track.appendChild(el('div', {class:'bar-fill', style:`width:${Math.min(d.pct,100)}%; background:${statusColor};`}));
+    const isSelected = deptFilter !== 'ALL' && d.dept === deptFilter;
+    const rowClass = 'bar-row hoverable' + (isSelected ? ' highlighted' : (deptFilter !== 'ALL' ? ' dimmed' : ''));
+    const row = el('div', {class: rowClass}, [
+      el('div', {class:'bar-label', title: d.dept}, [d.dept]),
+      track,
+      el('div', {class:'bar-value'}, [d.pct + '%']),
+    ]);
+    row.addEventListener('mousemove', (evt) => {
+      showTooltip(evt, `<b>${d.dept}</b><br>Budget: ${fmtR(d.budget)}<br>Expenses: ${fmtR(d.expenses)}<br>Commitments: ${fmtR(d.commitments)}<br>Available: ${fmtR(d.available)}`);
+    });
+    row.addEventListener('mouseleave', hideTooltip);
+    row.addEventListener('click', () => {
+      state.dept = d.dept;
+      deptFilterEl.value = d.dept;
+      render();
+    });
+    deptBars.appendChild(row);
+  });
+}
 
 // ---- trend line chart ----
-const svg = document.getElementById('trend-svg');
+// Gridlines/axis are static (built once below); only the per-department
+// lines depend on the filter, so those live in their own <g> that gets
+// cleared and rebuilt on every render() instead of redrawing everything.
 const NS = 'http://www.w3.org/2000/svg';
 const W = 900, H = 300, ML = 40, MR = 130, MT = 16, MB = 34;
 const plotW = W - ML - MR, plotH = H - MT - MB;
 const seriesColors = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)'];
 
-// x positions based on actual date gaps (not uniform index) so the 3-week
-// gap before 06-22 reads visually wider than the ~weekly gaps after it.
 const dateMs = DATA.dates.map(d => new Date(d).getTime());
-const t0 = dateMs[0], tN = dateMs[dateMs.length-1];
+const t0 = dateMs[0], tN = dateMs[dateMs.length - 1];
 const xs = dateMs.map(t => ML + ((t - t0) / (tN - t0)) * plotW);
 const yMax = 100;
 function yPos(pct) { return MT + plotH - (pct / yMax) * plotH; }
 
-// gridlines + y labels
-[0,25,50,75,100].forEach(v => {
-  const y = yPos(v);
-  const line = document.createElementNS(NS, 'line');
-  line.setAttribute('x1', ML); line.setAttribute('x2', W - MR);
-  line.setAttribute('y1', y); line.setAttribute('y2', y);
-  line.setAttribute('stroke', 'var(--gridline)'); line.setAttribute('stroke-width', '1');
-  svg.appendChild(line);
-  const label = document.createElementNS(NS, 'text');
-  label.setAttribute('x', ML - 8); label.setAttribute('y', y + 4);
-  label.setAttribute('text-anchor', 'end'); label.setAttribute('font-size', '11');
-  label.setAttribute('fill', 'var(--text-muted)');
-  label.textContent = v + '%';
-  svg.appendChild(label);
-});
-
-// x labels
-DATA.dates.forEach((d, i) => {
-  const label = document.createElementNS(NS, 'text');
-  label.setAttribute('x', xs[i]); label.setAttribute('y', H - 10);
-  label.setAttribute('text-anchor', 'middle'); label.setAttribute('font-size', '11');
-  label.setAttribute('fill', 'var(--text-muted)');
-  label.textContent = d.slice(5);
-  svg.appendChild(label);
-  const tick = document.createElementNS(NS, 'line');
-  tick.setAttribute('x1', xs[i]); tick.setAttribute('x2', xs[i]);
-  tick.setAttribute('y1', MT + plotH); tick.setAttribute('y2', MT + plotH + 4);
-  tick.setAttribute('stroke', 'var(--baseline)');
-  svg.appendChild(tick);
-});
-
-const legendEl = document.getElementById('trend-legend');
-DATA.top_dept_names.forEach((name, si) => {
-  const series = DATA.top_dept_series[name];
-  const color = seriesColors[si];
-  const pts = [];
-  series.forEach((v, i) => { if (v !== null) pts.push([xs[i], yPos(v)]); });
-  const path = document.createElementNS(NS, 'path');
-  path.setAttribute('d', pts.map((p,i) => (i===0?'M':'L') + p[0] + ',' + p[1]).join(' '));
-  path.setAttribute('fill', 'none');
-  path.setAttribute('stroke', color);
-  path.setAttribute('stroke-width', '2');
-  path.setAttribute('stroke-linecap', 'round');
-  svg.appendChild(path);
-
-  series.forEach((v, i) => {
-    if (v === null) return;
-    const c = document.createElementNS(NS, 'circle');
-    c.setAttribute('cx', xs[i]); c.setAttribute('cy', yPos(v)); c.setAttribute('r', 4);
-    c.setAttribute('fill', color);
-    c.setAttribute('stroke', 'var(--surface-1)'); c.setAttribute('stroke-width', '2');
-    c.style.cursor = 'pointer';
-    c.addEventListener('mousemove', (evt) => showTooltip(evt, `<b>${name}</b><br>${DATA.dates[i]}: ${v}% of budget`));
-    c.addEventListener('mouseleave', hideTooltip);
-    svg.appendChild(c);
+(function drawStaticAxes() {
+  const staticGroup = document.getElementById('trend-static');
+  [0, 25, 50, 75, 100].forEach(v => {
+    const y = yPos(v);
+    const line = document.createElementNS(NS, 'line');
+    line.setAttribute('x1', ML); line.setAttribute('x2', W - MR);
+    line.setAttribute('y1', y); line.setAttribute('y2', y);
+    line.setAttribute('stroke', 'var(--gridline)'); line.setAttribute('stroke-width', '1');
+    staticGroup.appendChild(line);
+    const label = document.createElementNS(NS, 'text');
+    label.setAttribute('x', ML - 8); label.setAttribute('y', y + 4);
+    label.setAttribute('text-anchor', 'end'); label.setAttribute('font-size', '11');
+    label.setAttribute('fill', 'var(--text-muted)');
+    label.textContent = v + '%';
+    staticGroup.appendChild(label);
   });
+  DATA.dates.forEach((d, i) => {
+    const label = document.createElementNS(NS, 'text');
+    label.setAttribute('x', xs[i]); label.setAttribute('y', H - 10);
+    label.setAttribute('text-anchor', 'middle'); label.setAttribute('font-size', '11');
+    label.setAttribute('fill', 'var(--text-muted)');
+    label.textContent = d.slice(5);
+    staticGroup.appendChild(label);
+    const tick = document.createElementNS(NS, 'line');
+    tick.setAttribute('x1', xs[i]); tick.setAttribute('x2', xs[i]);
+    tick.setAttribute('y1', MT + plotH); tick.setAttribute('y2', MT + plotH + 4);
+    tick.setAttribute('stroke', 'var(--baseline)');
+    staticGroup.appendChild(tick);
+  });
+})();
 
-  // direct end-label
-  const lastIdx = series.map((v,i)=>v!==null?i:-1).filter(i=>i>=0).pop();
-  const endLabel = document.createElementNS(NS, 'text');
-  endLabel.setAttribute('x', xs[lastIdx] + 10); endLabel.setAttribute('y', yPos(series[lastIdx]) + 4);
-  endLabel.setAttribute('font-size', '11.5'); endLabel.setAttribute('font-weight', '600');
-  endLabel.setAttribute('fill', color);
-  endLabel.textContent = series[lastIdx] + '%';
-  svg.appendChild(endLabel);
+function topDeptNamesByLatestPct(n) {
+  const latestIdx = numWeeks - 1;
+  return DATA.dept_list
+    .map(d => ({ dept: d, pct: deptPctAt(d, latestIdx) }))
+    .filter(x => x.pct !== null)
+    .sort((a, b) => b.pct - a.pct)
+    .slice(0, n)
+    .map(x => x.dept);
+}
+const FIXED_TOP_DEPTS = topDeptNamesByLatestPct(3);
 
-  legendEl.appendChild(el('div', {class:'legend-item'}, [
-    el('div', {class:'legend-swatch', style:`background:${color}`}),
-    name,
-  ]));
-});
+function renderTrend() {
+  const dynamicGroup = document.getElementById('trend-dynamic');
+  clearChildren(dynamicGroup);
+  const legendEl = document.getElementById('trend-legend');
+  clearChildren(legendEl);
+
+  const namesToShow = state.dept === 'ALL' ? FIXED_TOP_DEPTS : [state.dept];
+
+  namesToShow.forEach((name, si) => {
+    const color = seriesColors[si % seriesColors.length];
+    const series = DATA.dept_series[name].map(r => r.pct);
+    const pts = [];
+    series.forEach((v, i) => { if (v !== null) pts.push([xs[i], yPos(v)]); });
+
+    const path = document.createElementNS(NS, 'path');
+    path.setAttribute('d', pts.map((p, i) => (i === 0 ? 'M' : 'L') + p[0] + ',' + p[1]).join(' '));
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', color);
+    path.setAttribute('stroke-width', '2');
+    path.setAttribute('stroke-linecap', 'round');
+    dynamicGroup.appendChild(path);
+
+    series.forEach((v, i) => {
+      if (v === null) return;
+      const c = document.createElementNS(NS, 'circle');
+      c.setAttribute('cx', xs[i]); c.setAttribute('cy', yPos(v)); c.setAttribute('r', 4);
+      c.setAttribute('fill', color);
+      c.setAttribute('stroke', 'var(--surface-1)'); c.setAttribute('stroke-width', '2');
+      c.style.cursor = 'pointer';
+      c.addEventListener('mousemove', (evt) => showTooltip(evt, `<b>${name}</b><br>${DATA.dates[i]}: ${v}% of budget`));
+      c.addEventListener('mouseleave', hideTooltip);
+      dynamicGroup.appendChild(c);
+    });
+
+    const lastIdx = series.map((v, i) => v !== null ? i : -1).filter(i => i >= 0).pop();
+    if (lastIdx !== undefined) {
+      const endLabel = document.createElementNS(NS, 'text');
+      endLabel.setAttribute('x', xs[lastIdx] + 10); endLabel.setAttribute('y', yPos(series[lastIdx]) + 4);
+      endLabel.setAttribute('font-size', '11.5'); endLabel.setAttribute('font-weight', '600');
+      endLabel.setAttribute('fill', color);
+      endLabel.textContent = series[lastIdx] + '%';
+      dynamicGroup.appendChild(endLabel);
+    }
+
+    legendEl.appendChild(el('div', {class:'legend-item'}, [
+      el('div', {class:'legend-swatch', style:`background:${color}`}),
+      name,
+    ]));
+  });
+}
+
+function render() {
+  renderScopedProse();
+  renderTiles();
+  renderSitaHero();
+  renderVendorBars();
+  renderStaleTable();
+  renderDeptBars();
+  renderTrend();
+}
+
+render();
 </script>
 </body>
 </html>
