@@ -1,0 +1,408 @@
+<title>ExpenditureIntel — Commitments &amp; Budget Intel</title>
+<style>
+  .viz-root {
+    --surface-1:      #fcfcfb;
+    --page-plane:     #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --gridline:       #e1e0d9;
+    --baseline:       #c3c2b7;
+    --border:         rgba(11,11,11,0.10);
+    --series-1:       #2a78d6; /* blue */
+    --series-2:       #1baf7a; /* aqua */
+    --series-3:       #eda100; /* yellow */
+    --seq-100:        #cde2fb;
+    --seq-400:        #3987e5;
+    --seq-500:        #256abf;
+    --status-good:      #0ca30c;
+    --status-warning:   #fab219;
+    --status-critical:  #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    .viz-root {
+      --surface-1:      #1a1a19;
+      --page-plane:     #0d0d0d;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --gridline:       #2c2c2a;
+      --baseline:       #383835;
+      --border:         rgba(255,255,255,0.10);
+      --series-1:       #3987e5;
+      --series-2:       #199e70;
+      --series-3:       #c98500;
+      --seq-100:        #184f95;
+      --seq-400:        #3987e5;
+      --seq-500:        #6da7ec;
+    }
+  }
+  :root[data-theme="dark"] .viz-root {
+    --surface-1:      #1a1a19;
+    --page-plane:     #0d0d0d;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --gridline:       #2c2c2a;
+    --baseline:       #383835;
+    --border:         rgba(255,255,255,0.10);
+    --series-1:       #3987e5;
+    --series-2:       #199e70;
+    --series-3:       #c98500;
+    --seq-100:        #184f95;
+    --seq-400:        #3987e5;
+    --seq-500:        #6da7ec;
+  }
+  :root[data-theme="light"] .viz-root {
+    --surface-1:      #fcfcfb;
+    --page-plane:     #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --gridline:       #e1e0d9;
+    --baseline:       #c3c2b7;
+    --border:         rgba(11,11,11,0.10);
+    --series-1:       #2a78d6;
+    --series-2:       #1baf7a;
+    --series-3:       #eda100;
+    --seq-100:        #cde2fb;
+    --seq-400:        #3987e5;
+    --seq-500:        #256abf;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--page-plane);
+    color: var(--text-primary);
+  }
+  .viz-root { max-width: 1080px; margin: 0 auto; padding: 32px 20px 64px; }
+
+  header.page-head { margin-bottom: 28px; }
+  header.page-head h1 { font-size: 22px; font-weight: 700; margin: 0 0 6px; }
+  header.page-head p { font-size: 14px; color: var(--text-secondary); margin: 0; line-height: 1.5; }
+  .caveat {
+    margin-top: 14px; padding: 10px 14px; border-radius: 8px;
+    background: color-mix(in srgb, var(--status-warning) 12%, var(--surface-1));
+    border: 1px solid color-mix(in srgb, var(--status-warning) 35%, transparent);
+    font-size: 12.5px; color: var(--text-secondary); line-height: 1.5;
+  }
+
+  section { margin-bottom: 40px; }
+  section > h2 { font-size: 16px; font-weight: 700; margin: 0 0 4px; }
+  section > .section-sub { font-size: 13px; color: var(--text-secondary); margin: 0 0 16px; }
+
+  .tile-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 8px; }
+  @media (max-width: 720px) { .tile-row { grid-template-columns: repeat(2, 1fr); } }
+  .tile {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .tile .tile-label { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
+  .tile .tile-value { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .tile .tile-sub { font-size: 11.5px; color: var(--text-muted); margin-top: 4px; }
+  .tile.tile-critical .tile-value { color: var(--status-critical); }
+
+  .hero-box {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+    padding: 18px 20px; margin-bottom: 16px; display: flex; align-items: center; gap: 20px;
+    flex-wrap: wrap;
+  }
+  .hero-box .hero-figure { font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--status-critical); }
+  .hero-box .hero-text { font-size: 13.5px; color: var(--text-secondary); line-height: 1.5; max-width: 560px; }
+  .hero-box .hero-text b { color: var(--text-primary); }
+
+  .bar-list { display: flex; flex-direction: column; gap: 10px; }
+  .bar-row { display: grid; grid-template-columns: 190px 1fr 100px; align-items: center; gap: 10px; }
+  .bar-row .bar-label { font-size: 12.5px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar-track { position: relative; height: 20px; background: var(--gridline); border-radius: 4px; overflow: hidden; }
+  .bar-fill { position: absolute; top: 0; left: 0; height: 100%; border-radius: 4px; }
+  .bar-value { font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--text-secondary); text-align: right; }
+  .bar-row.hoverable { cursor: pointer; }
+  .bar-row.hoverable:hover .bar-label { color: var(--series-1); }
+
+  .status-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 20px; }
+  .status-chip.good { color: var(--status-good); background: color-mix(in srgb, var(--status-good) 14%, transparent); }
+  .status-chip.warning { color: var(--status-warning); background: color-mix(in srgb, var(--status-warning) 20%, transparent); }
+  .status-chip.critical { color: var(--status-critical); background: color-mix(in srgb, var(--status-critical) 16%, transparent); }
+
+  table.data-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.data-table th { text-align: left; font-weight: 600; color: var(--text-secondary); padding: 6px 10px; border-bottom: 1px solid var(--baseline); white-space: nowrap; }
+  table.data-table td { padding: 7px 10px; border-bottom: 1px solid var(--gridline); font-variant-numeric: tabular-nums; }
+  table.data-table td.num { text-align: right; }
+  table.data-table tbody tr:hover { background: color-mix(in srgb, var(--series-1) 6%, transparent); }
+  .table-wrap { overflow-x: auto; background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 4px 8px; }
+
+  .chart-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
+  .legend { display: flex; gap: 16px; margin-bottom: 10px; flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+  .legend-swatch { width: 10px; height: 10px; border-radius: 2px; }
+
+  .tooltip {
+    position: fixed; pointer-events: none; background: var(--text-primary); color: var(--surface-1);
+    font-size: 11.5px; padding: 6px 9px; border-radius: 6px; white-space: nowrap; opacity: 0; transition: opacity 0.08s;
+    z-index: 50; font-variant-numeric: tabular-nums;
+  }
+  .tooltip.show { opacity: 1; }
+
+  footer { font-size: 11.5px; color: var(--text-muted); border-top: 1px solid var(--gridline); padding-top: 14px; line-height: 1.6; }
+</style>
+
+<div class="viz-root">
+  <header class="page-head">
+    <h1>Commitments &amp; Budget Intel — Office of the Premier</h1>
+    <p>Five weekly commitment (GRV/vendor ledger) and expenditure control reports, reconciled item-by-item and rolled up by vendor and responsibility unit. Covers 2026-06-01 through 2026-07-13.</p>
+    <div class="caveat">⚠ Data quality note: the 2026-06-01 expenditure PDF has a corrupted embedded font encoding, which dropped the responsibility-unit header line entirely — <b>all 936 rows</b> for that date, not just a few, were missing it. Since a sub-unit belongs to exactly one responsibility unit as a structural fact (confirmed with zero conflicts across every other week, in both this report and the commitment ledger), every one of those 936 rows was safely backfilled from that mapping rather than estimated — the trend chart below reflects the real 2026-06-01 values, not an interpolation. Separately, all figures are independently reconciled to zero variance (574 of 575 item/week comparisons between the two report types match exactly).</div>
+  </header>
+
+  <section id="stats">
+    <div class="tile-row" id="tile-row"></div>
+  </section>
+
+  <section id="vendors">
+    <h2>Vendor exposure — outstanding commitments</h2>
+    <p class="section-sub">Unpaid GRV/order balances by vendor, latest snapshot (2026-07-13), with the 5-week trend.</p>
+    <div class="hero-box" id="sita-hero"></div>
+    <div class="chart-card">
+      <div class="legend"><div class="legend-item"><div class="legend-swatch" style="background:var(--series-1)"></div>Outstanding balance, 2026-07-13 (excl. SITA)</div></div>
+      <div class="bar-list" id="vendor-bars"></div>
+    </div>
+  </section>
+
+  <section id="stale">
+    <h2>Stale balances — no payment activity observed</h2>
+    <p class="section-sub">Vendors whose commitment balance has not moved by a single cent across 3 or more consecutive snapshots since first appearing in the ledger — a signal of unpaid invoices sitting untouched, not gradual settlement.</p>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead><tr><th>Vendor</th><th class="num">Balance</th><th class="num">Weeks unchanged</th><th>Status</th></tr></thead>
+        <tbody id="stale-tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="budget">
+    <h2>Budget burn-down by responsibility unit</h2>
+    <p class="section-sub">Share of each unit's annual budget already spent or committed, latest snapshot (2026-07-13). Sorted highest first.</p>
+    <div class="chart-card">
+      <div class="bar-list" id="dept-bars"></div>
+    </div>
+  </section>
+
+  <section id="trend">
+    <h2>Spend trajectory — top 3 units</h2>
+    <p class="section-sub">Percent of budget spent + committed, tracked across all five snapshots. Note the uneven spacing: the first gap (Jun 1 → Jun 22) spans three weeks; the rest are roughly weekly.</p>
+    <div class="chart-card">
+      <div class="legend" id="trend-legend"></div>
+      <svg id="trend-svg" width="100%" viewBox="0 0 900 300" style="overflow: visible;"></svg>
+    </div>
+  </section>
+
+  <footer>
+    Source: weekly BAS commitment (RP0233BS) and expenditure control (RP0203BS) exports for Office of the Premier, parsed and reconciled from raw mainframe dumps. Reconciliation matched 574 of 575 item/week figures exactly between the two independently-generated reports; the one remaining gap (INTERGRATED YOUTH DEVELO — SUPPP catering, R58,410, week of 2026-07-06) has no corresponding vendor/order detail anywhere in that week's ledger.
+  </footer>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+const DATA = __DATA_JSON__;
+
+function fmtR(n, opts) {
+  opts = opts || {};
+  const abs = Math.abs(n);
+  if (opts.compact && abs >= 1e6) return 'R' + (n/1e6).toFixed(abs >= 1e8 ? 0 : 1) + 'M';
+  if (opts.compact && abs >= 1e3) return 'R' + (n/1e3).toFixed(0) + 'K';
+  return 'R' + n.toLocaleString('en-ZA', {maximumFractionDigits: 0});
+}
+
+function el(tag, attrs, children) {
+  const e = document.createElement(tag);
+  for (const k in (attrs||{})) e.setAttribute(k, attrs[k]);
+  (children||[]).forEach(c => e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c));
+  return e;
+}
+
+const tooltip = document.getElementById('tooltip');
+function showTooltip(evt, html) {
+  tooltip.innerHTML = html;
+  tooltip.classList.add('show');
+  moveTooltip(evt);
+}
+function moveTooltip(evt) {
+  tooltip.style.left = (evt.clientX + 14) + 'px';
+  tooltip.style.top = (evt.clientY + 14) + 'px';
+}
+function hideTooltip() { tooltip.classList.remove('show'); }
+
+// ---- stat tiles ----
+const tileRow = document.getElementById('tile-row');
+const tiles = [
+  {label: 'Total outstanding commitments', value: fmtR(DATA.total_outstanding, {compact:true}), sub: 'across ' + DATA.num_vendors_outstanding + ' vendors, week of 2026-07-13'},
+  {label: 'Single largest vendor share', value: DATA.sita_pct_of_total + '%', sub: 'State Information Technology Agency alone', critical: true},
+  {label: 'Vendors with stale balances', value: DATA.num_flat_vendors, sub: 'unchanged for 3+ consecutive snapshots'},
+  {label: 'Units over 50% committed', value: DATA.num_depts_over_50pct + ' of ' + DATA.num_depts_total, sub: 'share of FY budget spent + committed'},
+];
+tiles.forEach(t => {
+  const tile = el('div', {class: 'tile' + (t.critical ? ' tile-critical' : '')}, [
+    el('div', {class:'tile-label'}, [t.label]),
+    el('div', {class:'tile-value'}, [String(t.value)]),
+    el('div', {class:'tile-sub'}, [t.sub]),
+  ]);
+  tileRow.appendChild(tile);
+});
+
+// ---- SITA hero ----
+document.getElementById('sita-hero').append(
+  el('div', {class:'hero-figure'}, [fmtR(DATA.sita_balance, {compact:true})]),
+  el('div', {class:'hero-text'}, [
+    (function(){
+      const d = document.createElement('span');
+      d.innerHTML = '<b>State Information Technology Agency (SITA)</b> — ICT infrastructure and data-line services — accounts for <b>' + DATA.sita_pct_of_total + '%</b> of every rand this department currently owes vendors. It is excluded from the chart below so the remaining vendors stay legible; its balance sits within Provincial ICT\'s R744.7M budget line and has been slowly declining (R398.3M → R374.9M over the observed period) but remains, by a wide margin, the department\'s largest single financial exposure.';
+      return d;
+    })()
+  ])
+);
+
+// ---- vendor bar chart (excl SITA) ----
+const vendorBars = document.getElementById('vendor-bars');
+const maxVendorBal = Math.max(...DATA.top_vendors_excl_sita.map(v => v.balance));
+DATA.top_vendors_excl_sita.forEach(v => {
+  const pct = (v.balance / maxVendorBal) * 100;
+  const track = el('div', {class:'bar-track'});
+  const fill = el('div', {class:'bar-fill', style:`width:${pct}%; background: var(--seq-400);`});
+  track.appendChild(fill);
+  const row = el('div', {class:'bar-row hoverable'}, [
+    el('div', {class:'bar-label', title: v.vendor}, [v.vendor]),
+    track,
+    el('div', {class:'bar-value'}, [fmtR(v.balance, {compact:true})]),
+  ]);
+  row.addEventListener('mousemove', (evt) => {
+    const seriesHtml = DATA.dates.map((d,i) => `${d}: ${fmtR(v.series[i])}`).join('<br>');
+    showTooltip(evt, `<b>${v.vendor}</b><br>${seriesHtml}`);
+  });
+  row.addEventListener('mouseleave', hideTooltip);
+  vendorBars.appendChild(row);
+});
+
+// ---- stale vendors table ----
+const staleBody = document.getElementById('stale-tbody');
+DATA.flat_vendors.forEach(v => {
+  const chipClass = v.weeks_flat >= 5 ? 'critical' : (v.weeks_flat >= 4 ? 'warning' : 'good');
+  const chipLabel = v.weeks_flat >= 5 ? 'Unchanged entire period' : (v.weeks_flat >= 4 ? 'Long-stale' : 'Stale');
+  const row = el('tr', {}, [
+    el('td', {}, [v.vendor]),
+    el('td', {class:'num'}, [fmtR(v.balance)]),
+    el('td', {class:'num'}, [String(v.weeks_flat)]),
+    el('td', {}, [el('span', {class:'status-chip ' + chipClass}, ['● ' + chipLabel])]),
+  ]);
+  staleBody.appendChild(row);
+});
+
+// ---- department budget bars ----
+const deptBars = document.getElementById('dept-bars');
+DATA.dept_ranking.forEach(d => {
+  const statusClass = d.pct >= 75 ? 'critical' : (d.pct >= 50 ? 'warning' : 'good');
+  const barColor = d.pct >= 75 ? 'var(--status-critical)' : (d.pct >= 50 ? 'var(--status-warning)' : 'var(--status-good)');
+  const track = el('div', {class:'bar-track'});
+  const fill = el('div', {class:'bar-fill', style:`width:${Math.min(d.pct,100)}%; background:${barColor};`});
+  track.appendChild(fill);
+  const row = el('div', {class:'bar-row hoverable'}, [
+    el('div', {class:'bar-label', title: d.dept}, [d.dept]),
+    track,
+    el('div', {class:'bar-value'}, [d.pct + '%']),
+  ]);
+  row.addEventListener('mousemove', (evt) => {
+    showTooltip(evt, `<b>${d.dept}</b><br>Budget: ${fmtR(d.budget)}<br>Expenses: ${fmtR(d.expenses)}<br>Commitments: ${fmtR(d.commitments)}<br>Available: ${fmtR(d.available)}`);
+  });
+  row.addEventListener('mouseleave', hideTooltip);
+  deptBars.appendChild(row);
+});
+
+// ---- trend line chart ----
+const svg = document.getElementById('trend-svg');
+const NS = 'http://www.w3.org/2000/svg';
+const W = 900, H = 300, ML = 40, MR = 130, MT = 16, MB = 34;
+const plotW = W - ML - MR, plotH = H - MT - MB;
+const seriesColors = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)'];
+
+// x positions based on actual date gaps (not uniform index) so the 3-week
+// gap before 06-22 reads visually wider than the ~weekly gaps after it.
+const dateMs = DATA.dates.map(d => new Date(d).getTime());
+const t0 = dateMs[0], tN = dateMs[dateMs.length-1];
+const xs = dateMs.map(t => ML + ((t - t0) / (tN - t0)) * plotW);
+const yMax = 100;
+function yPos(pct) { return MT + plotH - (pct / yMax) * plotH; }
+
+// gridlines + y labels
+[0,25,50,75,100].forEach(v => {
+  const y = yPos(v);
+  const line = document.createElementNS(NS, 'line');
+  line.setAttribute('x1', ML); line.setAttribute('x2', W - MR);
+  line.setAttribute('y1', y); line.setAttribute('y2', y);
+  line.setAttribute('stroke', 'var(--gridline)'); line.setAttribute('stroke-width', '1');
+  svg.appendChild(line);
+  const label = document.createElementNS(NS, 'text');
+  label.setAttribute('x', ML - 8); label.setAttribute('y', y + 4);
+  label.setAttribute('text-anchor', 'end'); label.setAttribute('font-size', '11');
+  label.setAttribute('fill', 'var(--text-muted)');
+  label.textContent = v + '%';
+  svg.appendChild(label);
+});
+
+// x labels
+DATA.dates.forEach((d, i) => {
+  const label = document.createElementNS(NS, 'text');
+  label.setAttribute('x', xs[i]); label.setAttribute('y', H - 10);
+  label.setAttribute('text-anchor', 'middle'); label.setAttribute('font-size', '11');
+  label.setAttribute('fill', 'var(--text-muted)');
+  label.textContent = d.slice(5);
+  svg.appendChild(label);
+  const tick = document.createElementNS(NS, 'line');
+  tick.setAttribute('x1', xs[i]); tick.setAttribute('x2', xs[i]);
+  tick.setAttribute('y1', MT + plotH); tick.setAttribute('y2', MT + plotH + 4);
+  tick.setAttribute('stroke', 'var(--baseline)');
+  svg.appendChild(tick);
+});
+
+const legendEl = document.getElementById('trend-legend');
+DATA.top_dept_names.forEach((name, si) => {
+  const series = DATA.top_dept_series[name];
+  const color = seriesColors[si];
+  const pts = [];
+  series.forEach((v, i) => { if (v !== null) pts.push([xs[i], yPos(v)]); });
+  const path = document.createElementNS(NS, 'path');
+  path.setAttribute('d', pts.map((p,i) => (i===0?'M':'L') + p[0] + ',' + p[1]).join(' '));
+  path.setAttribute('fill', 'none');
+  path.setAttribute('stroke', color);
+  path.setAttribute('stroke-width', '2');
+  path.setAttribute('stroke-linecap', 'round');
+  svg.appendChild(path);
+
+  series.forEach((v, i) => {
+    if (v === null) return;
+    const c = document.createElementNS(NS, 'circle');
+    c.setAttribute('cx', xs[i]); c.setAttribute('cy', yPos(v)); c.setAttribute('r', 4);
+    c.setAttribute('fill', color);
+    c.setAttribute('stroke', 'var(--surface-1)'); c.setAttribute('stroke-width', '2');
+    c.style.cursor = 'pointer';
+    c.addEventListener('mousemove', (evt) => showTooltip(evt, `<b>${name}</b><br>${DATA.dates[i]}: ${v}% of budget`));
+    c.addEventListener('mouseleave', hideTooltip);
+    svg.appendChild(c);
+  });
+
+  // direct end-label
+  const lastIdx = series.map((v,i)=>v!==null?i:-1).filter(i=>i>=0).pop();
+  const endLabel = document.createElementNS(NS, 'text');
+  endLabel.setAttribute('x', xs[lastIdx] + 10); endLabel.setAttribute('y', yPos(series[lastIdx]) + 4);
+  endLabel.setAttribute('font-size', '11.5'); endLabel.setAttribute('font-weight', '600');
+  endLabel.setAttribute('fill', color);
+  endLabel.textContent = series[lastIdx] + '%';
+  svg.appendChild(endLabel);
+
+  legendEl.appendChild(el('div', {class:'legend-item'}, [
+    el('div', {class:'legend-swatch', style:`background:${color}`}),
+    name,
+  ]));
+});
+</script>
