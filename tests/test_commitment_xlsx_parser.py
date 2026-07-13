@@ -7,6 +7,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from parsers.commitment_xlsx_parser import parse_level_code, extract_description, parse_commitment_workbook
 
 RAW_DIR = os.path.join(os.path.dirname(__file__), '..', 'data', 'raw')
+# The raw exports are gitignored (real government financial data, not
+# meant for version control), so CI checks out a repo without them. The
+# integration test below is skipped there rather than failing on missing
+# fixtures; the unit tests above it don't need real files and still run.
+_raw_files_present = os.path.isdir(RAW_DIR) and any(
+    fn.lower().endswith('.xlsx') for fn in os.listdir(RAW_DIR)
+)
 
 
 class TestParseLevelCode(unittest.TestCase):
@@ -51,6 +58,7 @@ class TestExtractDescription(unittest.TestCase):
         self.assertEqual(extract_description(row, 1, 3), 'GOODS AND SERVICES')
 
 
+@unittest.skipUnless(_raw_files_present, "raw data files not present (gitignored; expected in CI)")
 class TestParseCommitmentWorkbookIntegration(unittest.TestCase):
     """Pin known-good outputs for every real weekly export so a future
     change to the parser (or a new week's file with a similar quirk) shows

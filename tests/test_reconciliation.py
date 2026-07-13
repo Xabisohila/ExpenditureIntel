@@ -17,6 +17,13 @@ from parsers.commitment_xlsx_parser import parse_commitment_workbook
 from parsers.expenditure_pdf_parser import parse_expenditure_pdf
 
 RAW_DIR = os.path.join(os.path.dirname(__file__), '..', 'data', 'raw')
+# The raw exports are gitignored (real government financial data, not
+# meant for version control), so CI checks out a repo without them. This
+# end-to-end test is skipped there rather than failing on missing fixtures;
+# the synthetic-data tests above it don't need real files and still run.
+_raw_files_present = os.path.isdir(RAW_DIR) and any(
+    fn.lower().endswith(('.xlsx', '.pdf')) for fn in os.listdir(RAW_DIR)
+)
 
 
 def _commit_row(date, resp1, resp2, item_group, item, vendor, balance):
@@ -179,6 +186,7 @@ class TestBackfillResp1Desc(unittest.TestCase):
         self.assertEqual(commit[0]['resp1_desc'], 'GOV, STATE CAPACITY & INSTIT DEV')
 
 
+@unittest.skipUnless(_raw_files_present, "raw data files not present (gitignored; expected in CI)")
 class TestFullPipelineReconciliation(unittest.TestCase):
     """End-to-end pin across all 5 real weeks: parses every raw file
     directly (independent of whatever's in data/processed/), reconciles,
