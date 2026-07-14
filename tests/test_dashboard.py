@@ -117,8 +117,19 @@ class TestBuildDashboardData(unittest.TestCase):
         self.assertEqual(data['dept_list'], ['DEPT A', 'DEPT B'])
         self.assertEqual(len(data['vendor_records']), 4)
 
+    def test_row_counts_for_the_download_links(self):
+        data = build_dashboard_data(COMMITMENT_ROWS, EXPENDITURE_ROWS, ITEM_RECON_ROWS)
+        self.assertEqual(data['commitments_row_count'], len(COMMITMENT_ROWS))
+        self.assertEqual(data['expenditure_row_count'], len(EXPENDITURE_ROWS))
+
 
 class TestRenderHtml(unittest.TestCase):
+    def test_download_links_point_at_the_published_csv_paths(self):
+        data = build_dashboard_data(COMMITMENT_ROWS, EXPENDITURE_ROWS, ITEM_RECON_ROWS)
+        html = render_html(data)
+        self.assertIn('id="download-commitments" href="data/commitments.csv" download', html)
+        self.assertIn('id="download-expenditure" href="data/expenditure.csv" download', html)
+
     def test_produces_a_balanced_standalone_document(self):
         data = build_dashboard_data(COMMITMENT_ROWS, EXPENDITURE_ROWS, ITEM_RECON_ROWS)
         html = render_html(data)
@@ -185,6 +196,11 @@ class TestDashboardScriptInBrowser(unittest.TestCase):
         self.assertIn('New vendors (≥R10k) 1', headings)
         self.assertIn('Biggest balance movers 0', headings)
         self.assertIn('Paid off 0', headings)
+
+    def test_download_counts_reflect_the_actual_row_counts(self):
+        self.assertEqual(self.result['commitmentsCount'], f'({len(COMMITMENT_ROWS)} rows)')
+        self.assertEqual(self.result['expenditureCount'], f'({len(EXPENDITURE_ROWS)} rows)')
+        self.assertIn('parsed dataset', self.result['downloadSub'].lower())
 
     def test_earliest_week_has_no_prior_snapshot(self):
         earliest = self.result['earliestWeek']

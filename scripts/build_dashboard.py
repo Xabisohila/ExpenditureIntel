@@ -110,6 +110,8 @@ def build_dashboard_data(commitment_rows, expenditure_rows, item_recon_rows):
         'dept_list': dept_list,
         'dept_series': dept_series,
         'vendor_records': vendor_records,
+        'commitments_row_count': len(commitment_rows),
+        'expenditure_row_count': len(expenditure_rows),
     }
     data.update(build_reconciliation_data(item_recon_rows))
     return data

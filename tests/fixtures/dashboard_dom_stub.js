@@ -89,6 +89,13 @@ function snapshot() {
 require(path.resolve(scriptPath));
 
 const out = { initial: snapshot() };
+// download-sub/commitments-count/expenditure-count get their text set by
+// JS; the <a href> targets are static markup the JS never touches, so
+// those are checked directly against the rendered HTML string in Python
+// instead of through this stub.
+out.downloadSub = registry.get('download-sub')._text;
+out.commitmentsCount = registry.get('commitments-count')._text;
+out.expenditureCount = registry.get('expenditure-count')._text;
 
 const deptFilterEl = registry.get('dept-filter');
 const weekFilterEl = registry.get('week-filter');

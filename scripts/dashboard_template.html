@@ -190,6 +190,21 @@
   .delta-list li .delta-value.critical { color: var(--status-critical); }
   .delta-empty { font-size: 12.5px; color: var(--text-muted); font-style: italic; }
   .delta-more { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
+
+  .download-card {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    flex-wrap: wrap; margin-bottom: 28px;
+  }
+  .download-text strong { font-size: 13.5px; color: var(--text-primary); }
+  .download-text p { margin: 3px 0 0; font-size: 12px; color: var(--text-secondary); }
+  .download-links { display: flex; gap: 10px; flex-wrap: wrap; }
+  .download-btn {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600;
+    color: var(--text-primary); background: var(--page-plane); border: 1px solid var(--baseline);
+    border-radius: 8px; padding: 8px 14px; text-decoration: none; white-space: nowrap;
+  }
+  .download-btn:hover { border-color: var(--series-1); color: var(--series-1); }
+  .download-btn .download-count { color: var(--text-muted); font-weight: 400; }
 </style>
 </head>
 <body>
@@ -200,6 +215,21 @@
     <p id="header-sub"></p>
     <div class="caveat">⚠ Data quality note: the 2026-06-01 expenditure PDF has a corrupted embedded font encoding, which dropped the responsibility-unit header line entirely — <b>all 936 rows</b> for that date, not just a few, were missing it. Since a sub-unit belongs to exactly one responsibility unit as a structural fact (confirmed with zero conflicts across every other week, in both this report and the commitment ledger), every one of those 936 rows was safely backfilled from that mapping rather than estimated — the trend chart below reflects the real 2026-06-01 values, not an interpolation. Separately, <span id="recon-summary"></span></div>
   </header>
+
+  <div class="chart-card download-card">
+    <div class="download-text">
+      <strong>Download the clean data</strong>
+      <p id="download-sub"></p>
+    </div>
+    <div class="download-links">
+      <a class="download-btn" id="download-commitments" href="data/commitments.csv" download>
+        ⬇ commitments.csv <span class="download-count" id="commitments-count"></span>
+      </a>
+      <a class="download-btn" id="download-expenditure" href="data/expenditure.csv" download>
+        ⬇ expenditure.csv <span class="download-count" id="expenditure-count"></span>
+      </a>
+    </div>
+  </div>
 
   <div class="filter-row">
     <div class="filter-field">
@@ -449,6 +479,11 @@ document.getElementById('header-sub').textContent =
 
 document.getElementById('recon-summary').textContent =
   `all figures are independently reconciled to zero variance (${DATA.reconciliation_matched} of ${DATA.reconciliation_total} item/week comparisons between the two report types match exactly).`;
+
+document.getElementById('download-sub').textContent =
+  `The full parsed dataset behind everything on this page -- every vendor/order and every budget line, across all ${numWeeks} weeks.`;
+document.getElementById('commitments-count').textContent = `(${DATA.commitments_row_count.toLocaleString('en-ZA')} rows)`;
+document.getElementById('expenditure-count').textContent = `(${DATA.expenditure_row_count.toLocaleString('en-ZA')} rows)`;
 
 (function() {
   const footerEl = document.getElementById('footer-text');
