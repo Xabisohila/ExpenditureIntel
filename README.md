@@ -153,3 +153,8 @@ crossings, reconciliation gaps appearing/resolving) comparing whichever
 two consecutive weeks the week filter selects — the same computation as
 `weekly_delta.py`, ported to JS so it's visible on the published page
 without anyone running a script.
+
+The full parsed datasets (`commitments.csv`, `expenditure.csv` — every
+vendor/order and every budget line, across all weeks, not just what's
+currently filtered on screen) are downloadable directly from the page,
+served as static files from `docs/data/`.
