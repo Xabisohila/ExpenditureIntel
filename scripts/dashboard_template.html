@@ -191,6 +191,18 @@
   .delta-empty { font-size: 12.5px; color: var(--text-muted); font-style: italic; }
   .delta-more { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
 
+  .narrative-card {
+    background: color-mix(in srgb, var(--series-1) 6%, var(--surface-1));
+    border: 1px solid color-mix(in srgb, var(--series-1) 20%, transparent);
+    margin-bottom: 20px;
+  }
+  .narrative-greeting { font-size: 12.5px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; }
+  .narrative-lead { font-size: 15.5px; font-weight: 700; color: var(--text-primary); }
+  .narrative-header { font-size: 12px; color: var(--text-muted); margin: 4px 0 10px; }
+  .narrative-list { margin: 0; padding-left: 18px; font-size: 13px; color: var(--text-secondary); line-height: 1.75; }
+  .narrative-list li::marker { color: var(--series-1); }
+  .narrative-empty { font-size: 13.5px; color: var(--text-secondary); }
+
   .download-card {
     display: flex; align-items: center; justify-content: space-between; gap: 16px;
     flex-wrap: wrap; margin-bottom: 28px;
@@ -255,6 +267,13 @@
     </div>
     <button class="filter-reset" id="filter-reset" type="button">Reset filters</button>
   </div>
+
+  <section id="narrative">
+    <div class="chart-card narrative-card" id="narrative-card">
+      <div class="narrative-greeting">Good morning.</div>
+      <div id="narrative-text"></div>
+    </div>
+  </section>
 
   <section id="delta">
     <h2 id="delta-heading">Recent changes</h2>
@@ -967,6 +986,81 @@ function buildDeltaGroup(title, count, items, maxShow) {
   return group;
 }
 
+function renderNarrative() {
+  const container = document.getElementById('narrative-text');
+  clearChildren(container);
+  const { dept: deptFilter, weekIndex } = state;
+  const currDate = DATA.dates[weekIndex];
+
+  if (weekIndex === 0) {
+    container.appendChild(el('div', {class:'narrative-empty'}, [`No prior snapshot exists before ${currDate} to compare against yet.`]));
+    return;
+  }
+
+  const prevIndex = weekIndex - 1;
+  const prevDate = DATA.dates[prevIndex];
+  const v = computeVendorDeltas(deptFilter, prevIndex, weekIndex);
+  const d = computeDeptDeltas(deptFilter, prevIndex, weekIndex);
+  const r = computeReconciliationDeltas(prevDate, currDate);
+  const newProcFlags = DATA.procurement_groups.filter(g =>
+    g.flagged && g.report_date === currDate && (deptFilter === 'ALL' || g.resp1_desc === deptFilter));
+
+  const sentences = [];
+
+  d.crossings.forEach(x => {
+    sentences.push(`${x.dept} crossed ${Math.max(...x.crossed)}% of budget committed (now ${x.currPct}%).`);
+  });
+
+  const crossedDepts = new Set(d.crossings.map(x => x.dept));
+  d.movers.filter(x => !crossedDepts.has(x.dept)).forEach(x => {
+    const dir = x.jump > 0 ? 'up' : 'down';
+    sentences.push(`${x.dept}'s budget-committed share moved ${dir} ${Math.abs(x.jump).toFixed(1)} points (${x.prevPct}% → ${x.currPct}%).`);
+  });
+
+  if (v.newlyStale.length) {
+    const names = v.newlyStale.slice(0, 3).map(x => x.vendor).join(', ');
+    const extra = v.newlyStale.length > 3 ? `, +${v.newlyStale.length - 3} more` : '';
+    sentences.push(`${v.newlyStale.length} vendor${v.newlyStale.length === 1 ? '' : 's'} had no balance movement for 3+ consecutive weeks: ${names}${extra}.`);
+  }
+
+  if (newProcFlags.length) {
+    const names = newProcFlags.slice(0, 2).map(g => `${g.vendor} (${fmtR(g.total, {compact:true})})`).join(', ');
+    sentences.push(`${newProcFlags.length} procurement threshold-proximity flag${newProcFlags.length === 1 ? '' : 's'} this week: ${names}.`);
+  }
+
+  if (r.newlyFlagged.length) {
+    sentences.push(`${r.newlyFlagged.length} new reconciliation gap${r.newlyFlagged.length === 1 ? '' : 's'} appeared between the two reports.`);
+  }
+  if (r.resolved.length) {
+    sentences.push(`${r.resolved.length} previously-flagged reconciliation gap${r.resolved.length === 1 ? '' : 's'} resolved.`);
+  }
+  if (v.newLarge.length) {
+    sentences.push(`${v.newLarge.length} new vendor commitment${v.newLarge.length === 1 ? '' : 's'} appeared at R10k or more.`);
+  }
+  if (v.paidOff.length) {
+    sentences.push(`${v.paidOff.length} vendor balance${v.paidOff.length === 1 ? '' : 's'} paid off in full.`);
+  }
+
+  const scopeSuffix = deptFilter === 'ALL' ? '' : ` for ${deptFilter}`;
+  const headerText = `Comparing ${prevDate} → ${currDate}${scopeSuffix}.`;
+
+  if (sentences.length === 0) {
+    container.appendChild(el('div', {class:'narrative-header'}, [headerText]));
+    container.appendChild(el('div', {class:'narrative-empty'}, [
+      'Nothing crossed a threshold this week -- no new stale vendors, budget crossings, procurement flags, or reconciliation changes.'
+    ]));
+    return;
+  }
+
+  container.appendChild(el('div', {class:'narrative-lead'}, [
+    `${sentences.length} issue${sentences.length === 1 ? '' : 's'} need attention this week.`
+  ]));
+  container.appendChild(el('div', {class:'narrative-header'}, [headerText]));
+  const list = el('ul', {class:'narrative-list'});
+  sentences.forEach(s => list.appendChild(el('li', {}, [s])));
+  container.appendChild(list);
+}
+
 function renderDelta() {
   const card = document.getElementById('delta-card');
   clearChildren(card);
@@ -1014,6 +1108,7 @@ function renderDelta() {
 }
 
 function render() {
+  renderNarrative();
   renderScopedProse();
   renderFilteredDownload();
   renderDelta();

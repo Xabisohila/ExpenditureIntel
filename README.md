@@ -121,7 +121,7 @@ src/procurement_flags.py   same-vendor/item multi-order grouping +
                          competitive-bidding threshold-proximity detection
 scripts/                one script per pipeline stage, thin CLI wrappers
                          around src/ — each also usable standalone
-tests/                   96 tests: unit tests against synthetic data (always
+tests/                   99 tests: unit tests against synthetic data (always
                          run) + integration tests pinning known-good output
                          against every real file (skip without data/raw/) +
                          dashboard tests that run the generated <script>
@@ -154,11 +154,23 @@ it justifies):
 
 Filterable by responsibility unit and snapshot week; every section
 recomputes client-side rather than only ever showing the latest week.
-Includes a "Recent changes" panel (newly stale vendors, budget threshold
-crossings, reconciliation gaps appearing/resolving) comparing whichever
-two consecutive weeks the week filter selects — the same computation as
-`weekly_delta.py`, ported to JS so it's visible on the published page
-without anyone running a script.
+
+At the top, a plain-language narrative ("N issues need attention this
+week: ...") answers "what needs my attention today?" directly, instead of
+requiring someone to read every chart and work that out themselves. It's
+composed entirely from signals the pipeline already computes -- budget
+threshold crossings, newly stale vendors, procurement threshold flags,
+reconciliation gaps appearing/resolving, new/paid-off vendor commitments
+-- filtered to whichever department + week scope is selected, with no
+live AI call involved (a templated summary, not a generated one, so
+there's no data-governance question about sending financial data to a
+third-party API).
+
+Below that, a "Recent changes" panel breaks the same comparison down by
+category (newly stale vendors, budget threshold crossings, reconciliation
+gaps appearing/resolving) for whichever two consecutive weeks the week
+filter selects — the same computation as `weekly_delta.py`, ported to JS
+so it's visible on the published page without anyone running a script.
 
 The full parsed datasets (`commitments.csv`, `expenditure.csv` — every
 vendor/order and every budget line, across all weeks, not just what's

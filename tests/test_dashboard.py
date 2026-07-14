@@ -224,6 +224,38 @@ class TestDashboardScriptInBrowser(unittest.TestCase):
         self.assertIn('Biggest balance movers 0', headings)
         self.assertIn('Paid off 0', headings)
 
+    def test_narrative_composes_a_sentence_per_signal(self):
+        initial = self.result['initial']
+        self.assertFalse(initial['narrativeIsEmptyState'])
+        self.assertEqual(initial['narrativeHeader'], 'Comparing 2026-01-08 → 2026-01-15.')
+        self.assertEqual(initial['narrativeLead'], '6 issues need attention this week.')
+        self.assertEqual(initial['narrativeSentences'], [
+            'DEPT A crossed 90% of budget committed (now 90%).',
+            "DEPT B's budget-committed share moved up 2.0 points (17% → 19%).",
+            '1 vendor had no balance movement for 3+ consecutive weeks: VENDOR X.',
+            '1 procurement threshold-proximity flag this week: VENDOR BIG (R1.1M).',
+            '1 new reconciliation gap appeared between the two reports.',
+            '1 new vendor commitment appeared at R10k or more.',
+        ])
+
+    def test_narrative_has_no_prior_week_message_at_the_earliest_snapshot(self):
+        earliest = self.result['earliestWeek']
+        self.assertTrue(earliest['narrativeIsEmptyState'])
+        self.assertIsNone(earliest['narrativeHeader'])
+
+    def test_narrative_narrows_and_drops_the_out_of_scope_procurement_flag(self):
+        # DEPT A has no procurement flags of its own (VENDOR BIG is DEPT C),
+        # so that sentence should disappear entirely rather than showing a
+        # zero-count line.
+        deptFiltered = self.result['deptFiltered']
+        self.assertEqual(deptFiltered['narrativeHeader'], 'Comparing 2026-01-08 → 2026-01-15 for DEPT A.')
+        self.assertEqual(deptFiltered['narrativeLead'], '3 issues need attention this week.')
+        self.assertEqual(deptFiltered['narrativeSentences'], [
+            'DEPT A crossed 90% of budget committed (now 90%).',
+            '1 vendor had no balance movement for 3+ consecutive weeks: VENDOR X.',
+            '1 new reconciliation gap appeared between the two reports.',
+        ])
+
     def test_download_counts_reflect_the_actual_row_counts(self):
         self.assertEqual(self.result['commitmentsCount'], f'({len(COMMITMENT_ROWS)} rows)')
         self.assertEqual(self.result['expenditureCount'], f'({len(EXPENDITURE_ROWS)} rows)')

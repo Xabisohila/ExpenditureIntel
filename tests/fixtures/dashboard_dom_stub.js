@@ -75,6 +75,11 @@ function snapshot() {
   const firstChild = deltaCard.children[0];
   const isGrid = !!(firstChild && firstChild._attrs.class === 'delta-grid');
   const groups = isGrid ? firstChild.children : [];
+
+  const narrativeContainer = registry.get('narrative-text');
+  const findByClass = (cls) => narrativeContainer.children.find(c => c._attrs.class === cls);
+  const narrativeList = findByClass('narrative-list');
+
   return {
     deltaSub: registry.get('delta-sub')._text,
     deltaIsEmptyState: !!(firstChild && firstChild._attrs.class === 'delta-empty'),
@@ -86,6 +91,10 @@ function snapshot() {
     procurementRowCount: registry.get('procurement-tbody').children.length,
     procurementSub: registry.get('procurement-sub')._text,
     filteredCount: registry.get('filtered-count')._text,
+    narrativeIsEmptyState: !!findByClass('narrative-empty'),
+    narrativeLead: findByClass('narrative-lead') ? flattenText(findByClass('narrative-lead')) : null,
+    narrativeHeader: findByClass('narrative-header') ? flattenText(findByClass('narrative-header')) : null,
+    narrativeSentences: narrativeList ? narrativeList.children.map(flattenText) : [],
   };
 }
 
