@@ -170,6 +170,26 @@
   }
   .bar-row.dimmed { opacity: 0.35; }
   .bar-row.highlighted .bar-label { font-weight: 700; color: var(--series-1); }
+
+  .delta-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 22px; }
+  @media (max-width: 720px) { .delta-grid { grid-template-columns: 1fr; } }
+  .delta-group h3 {
+    font-size: 12.5px; font-weight: 700; margin: 0 0 8px; display: flex; align-items: center; gap: 6px;
+    color: var(--text-primary);
+  }
+  .delta-group h3 .count-badge {
+    font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 20px;
+    background: var(--gridline); color: var(--text-secondary);
+  }
+  .delta-group h3.has-items .count-badge { background: color-mix(in srgb, var(--status-warning) 20%, transparent); color: var(--status-warning); }
+  .delta-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+  .delta-list li { font-size: 12.5px; display: flex; justify-content: space-between; gap: 10px; }
+  .delta-list li .delta-label { color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .delta-list li .delta-value { font-variant-numeric: tabular-nums; color: var(--text-secondary); white-space: nowrap; }
+  .delta-list li .delta-value.good { color: var(--status-good); }
+  .delta-list li .delta-value.critical { color: var(--status-critical); }
+  .delta-empty { font-size: 12.5px; color: var(--text-muted); font-style: italic; }
+  .delta-more { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
 </style>
 </head>
 <body>
@@ -192,6 +212,12 @@
     </div>
     <button class="filter-reset" id="filter-reset" type="button">Reset filters</button>
   </div>
+
+  <section id="delta">
+    <h2 id="delta-heading">Recent changes</h2>
+    <p class="section-sub" id="delta-sub"></p>
+    <div class="chart-card" id="delta-card"></div>
+  </section>
 
   <section id="stats">
     <div class="tile-row" id="tile-row"></div>
@@ -341,6 +367,79 @@ function streakEndingAt(series, uptoIndex) {
 function deptPctAt(dept, weekIndex) {
   const rec = DATA.dept_series[dept] && DATA.dept_series[dept][weekIndex];
   return rec ? rec.pct : null;
+}
+
+// ---- week-over-week delta computation, mirroring src/delta.py's
+// vendor_deltas / dept_deltas / reconciliation_deltas exactly, but running
+// client-side against whatever two consecutive weeks the filters select
+// (src/delta.py only ever compares the two most recent). No new data is
+// needed from Python for this: vendor_records/dept_series already carry
+// every week, and reconciliation_gaps already carries every flagged row's
+// own report_date. ----
+const NEW_VENDOR_MIN_BALANCE = 10000;
+const DEPT_MIN_PCT_JUMP = 2.0;
+const STALE_STREAK_THRESHOLD = 3;
+const BUDGET_THRESHOLDS = [50, 75, 90, 100];
+
+function computeVendorDeltas(deptFilter, prevIndex, currIndex) {
+  const seriesMap = vendorFullSeries(deptFilter);
+  const newlyStale = [], paidOff = [], newLarge = [], bigMovers = [];
+
+  for (const [vendor, series] of seriesMap.entries()) {
+    const prevVal = series[prevIndex] || 0;
+    const currVal = series[currIndex] || 0;
+
+    if (prevVal === 0 && currVal >= NEW_VENDOR_MIN_BALANCE) {
+      newLarge.push({ vendor, balance: currVal });
+    } else if (prevVal > 0 && currVal === 0) {
+      paidOff.push({ vendor, priorBalance: prevVal });
+    } else if (prevVal > 0 && currVal > 0) {
+      const change = currVal - prevVal;
+      if (Math.abs(change) > 0.01) {
+        bigMovers.push({ vendor, priorBalance: prevVal, latestBalance: currVal, change });
+      } else {
+        const streakCurr = streakEndingAt(series, currIndex);
+        const streakPrev = streakEndingAt(series, prevIndex);
+        if (streakCurr >= STALE_STREAK_THRESHOLD && streakPrev < STALE_STREAK_THRESHOLD) {
+          newlyStale.push({ vendor, balance: currVal, weeksUnchanged: streakCurr });
+        }
+      }
+    }
+  }
+  newLarge.sort((a, b) => b.balance - a.balance);
+  paidOff.sort((a, b) => b.priorBalance - a.priorBalance);
+  bigMovers.sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
+  newlyStale.sort((a, b) => b.balance - a.balance);
+  return { newlyStale, paidOff, newLarge, bigMovers };
+}
+
+function computeDeptDeltas(deptFilter, prevIndex, currIndex) {
+  const depts = deptFilter === 'ALL' ? DATA.dept_list : [deptFilter];
+  const crossings = [], movers = [];
+  for (const dept of depts) {
+    const prevPct = deptPctAt(dept, prevIndex);
+    const currPct = deptPctAt(dept, currIndex);
+    if (prevPct === null || currPct === null) continue;
+    const jump = currPct - prevPct;
+    const crossed = BUDGET_THRESHOLDS.filter(t => prevPct < t && t <= currPct);
+    if (crossed.length) crossings.push({ dept, prevPct, currPct, crossed });
+    if (Math.abs(jump) >= DEPT_MIN_PCT_JUMP) movers.push({ dept, prevPct, currPct, jump });
+  }
+  crossings.sort((a, b) => Math.max(...b.crossed) - Math.max(...a.crossed));
+  movers.sort((a, b) => Math.abs(b.jump) - Math.abs(a.jump));
+  return { crossings, movers };
+}
+
+function computeReconciliationDeltas(prevDate, currDate) {
+  const key = g => g.resp2_desc + '|' + g.item_desc;
+  const prevGaps = DATA.reconciliation_gaps.filter(g => g.report_date === prevDate);
+  const currGaps = DATA.reconciliation_gaps.filter(g => g.report_date === currDate);
+  const prevKeys = new Set(prevGaps.map(key));
+  const currKeys = new Set(currGaps.map(key));
+  return {
+    newlyFlagged: currGaps.filter(g => !prevKeys.has(key(g))),
+    resolved: prevGaps.filter(g => !currKeys.has(key(g))),
+  };
 }
 
 // ---- static prose (doesn't change with filters -- global facts about the
@@ -690,8 +789,79 @@ function renderTrend() {
   });
 }
 
+function deltaLi(label, value, valueClass) {
+  return el('li', {}, [
+    el('span', {class:'delta-label', title: label}, [label]),
+    el('span', {class:'delta-value' + (valueClass ? ' ' + valueClass : '')}, [value]),
+  ]);
+}
+
+function buildDeltaGroup(title, count, items, maxShow) {
+  maxShow = maxShow || 6;
+  const group = el('div', {class:'delta-group'});
+  group.appendChild(el('h3', {class: count > 0 ? 'has-items' : ''}, [title + ' ', el('span', {class:'count-badge'}, [String(count)])]));
+  if (count === 0) {
+    group.appendChild(el('div', {class:'delta-empty'}, ['None']));
+  } else {
+    const list = el('ul', {class:'delta-list'});
+    items.slice(0, maxShow).forEach(li => list.appendChild(li));
+    group.appendChild(list);
+    if (items.length > maxShow) {
+      group.appendChild(el('div', {class:'delta-more'}, [`+${items.length - maxShow} more`]));
+    }
+  }
+  return group;
+}
+
+function renderDelta() {
+  const card = document.getElementById('delta-card');
+  clearChildren(card);
+  const { dept: deptFilter, weekIndex } = state;
+  const currDate = DATA.dates[weekIndex];
+
+  if (weekIndex === 0) {
+    document.getElementById('delta-sub').textContent = `No prior snapshot exists before ${currDate} to compare against.`;
+    card.appendChild(el('div', {class:'delta-empty'}, ['Select a later week to see what changed since the previous snapshot.']));
+    return;
+  }
+
+  const prevIndex = weekIndex - 1;
+  const prevDate = DATA.dates[prevIndex];
+  document.getElementById('delta-sub').textContent =
+    `Comparing ${prevDate} → ${currDate}` + (deptFilter === 'ALL' ? '' : ` for ${deptFilter}`) + '.';
+
+  const v = computeVendorDeltas(deptFilter, prevIndex, weekIndex);
+  const d = computeDeptDeltas(deptFilter, prevIndex, weekIndex);
+  const r = computeReconciliationDeltas(prevDate, currDate);
+
+  const grid = el('div', {class:'delta-grid'});
+
+  grid.appendChild(buildDeltaGroup('Reconciliation changes', r.newlyFlagged.length + r.resolved.length, [
+    ...r.newlyFlagged.map(g => deltaLi(`NEW GAP: ${g.resp2_desc} / ${g.item_desc}`, fmtR(Math.abs(g.variance)), 'critical')),
+    ...r.resolved.map(g => deltaLi(`Resolved: ${g.resp2_desc} / ${g.item_desc}`, '✓', 'good')),
+  ]));
+
+  grid.appendChild(buildDeltaGroup('Budget threshold crossings', d.crossings.length,
+    d.crossings.map(x => deltaLi(x.dept, `${x.prevPct}% → ${x.currPct}%`, 'critical'))));
+
+  grid.appendChild(buildDeltaGroup('Newly stale vendors', v.newlyStale.length,
+    v.newlyStale.map(x => deltaLi(x.vendor, fmtR(x.balance, {compact:true}), 'critical'))));
+
+  grid.appendChild(buildDeltaGroup('Biggest balance movers', v.bigMovers.length,
+    v.bigMovers.map(x => deltaLi(x.vendor, (x.change > 0 ? '+' : '') + fmtR(x.change, {compact:true}), x.change < 0 ? 'good' : undefined))));
+
+  grid.appendChild(buildDeltaGroup('New vendors (≥R10k)', v.newLarge.length,
+    v.newLarge.map(x => deltaLi(x.vendor, fmtR(x.balance, {compact:true})))));
+
+  grid.appendChild(buildDeltaGroup('Paid off', v.paidOff.length,
+    v.paidOff.map(x => deltaLi(x.vendor, fmtR(x.priorBalance, {compact:true}), 'good'))));
+
+  card.appendChild(grid);
+}
+
 function render() {
   renderScopedProse();
+  renderDelta();
   renderTiles();
   renderSitaHero();
   renderVendorBars();
