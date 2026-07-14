@@ -205,6 +205,15 @@
   }
   .download-btn:hover { border-color: var(--series-1); color: var(--series-1); }
   .download-btn .download-count { color: var(--text-muted); font-weight: 400; }
+
+  .procurement-caveat {
+    margin-bottom: 14px; padding: 10px 14px; border-radius: 8px;
+    background: color-mix(in srgb, var(--series-1) 8%, var(--surface-1));
+    border: 1px solid color-mix(in srgb, var(--series-1) 25%, transparent);
+    font-size: 12.5px; color: var(--text-secondary); line-height: 1.55;
+  }
+  .procurement-caveat a { color: var(--series-1); }
+  table.data-table td.item-cell { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -270,6 +279,26 @@
       <table class="data-table">
         <thead><tr><th>Vendor</th><th class="num">Balance</th><th class="num">Weeks unchanged</th><th>Status</th></tr></thead>
         <tbody id="stale-tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="procurement">
+    <h2>Procurement threshold review</h2>
+    <p class="section-sub" id="procurement-sub"></p>
+    <div class="procurement-caveat">
+      Multiple orders to the same vendor, for the same item, outstanding in the same weekly snapshot, where the
+      combined total crosses the <b>R1,000,000</b> competitive-bidding threshold while no single order does, are
+      flagged below. Eastern Cape Provincial Treasury Circular 03/2021-22 (disseminating National Treasury PFMA SCM
+      Instruction 02/2021-22, effective 1 July 2021) sets that threshold and its paragraph 4.1 prohibits
+      deliberately splitting procurement into smaller transactions to avoid the prescribed process. <b>This is not
+      evidence of wrongdoing on its own</b> — legitimate reasons include staggered delivery against one contract or
+      genuinely separate needs landing in the same week — but a flagged combination warrants a supply-chain-management look.
+    </div>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead><tr><th>Vendor</th><th>Item</th><th>Week</th><th class="num">Orders</th><th class="num">Combined total</th><th>Status</th></tr></thead>
+        <tbody id="procurement-tbody"></tbody>
       </table>
     </div>
   </section>
@@ -682,6 +711,43 @@ function renderStaleTable() {
   });
 }
 
+function renderProcurement() {
+  const tbody = document.getElementById('procurement-tbody');
+  clearChildren(tbody);
+  const { dept: deptFilter } = state;
+
+  const groups = DATA.procurement_groups.filter(g => deptFilter === 'ALL' || g.resp1_desc === deptFilter);
+  const flaggedCount = groups.filter(g => g.flagged).length;
+
+  document.getElementById('procurement-sub').textContent =
+    `${groups.length} same-vendor/item group(s)` + (deptFilter === 'ALL' ? '' : ` in ${deptFilter}`) +
+    ` with 2 or more distinct orders outstanding in the same weekly snapshot, across all ${numWeeks} snapshots; ` +
+    `${flaggedCount} cross R${DATA.procurement_threshold.toLocaleString('en-ZA')} combined without any single order doing so on its own.`;
+
+  if (groups.length === 0) {
+    tbody.appendChild(el('tr', {}, [el('td', {colspan: '6'}, ['No multi-order purchases in this scope.'])]));
+    return;
+  }
+
+  groups.forEach(g => {
+    const chipClass = g.flagged ? 'critical' : 'good';
+    const chipLabel = g.flagged ? '⚠ Flagged' : '● Below threshold';
+    const row = el('tr', {}, [
+      el('td', {}, [g.vendor]),
+      el('td', {class:'item-cell', title: g.item_desc}, [g.item_desc]),
+      el('td', {}, [g.report_date]),
+      el('td', {class:'num'}, [String(g.order_count)]),
+      el('td', {class:'num'}, [fmtR(g.total)]),
+      el('td', {}, [el('span', {class:'status-chip ' + chipClass}, [chipLabel])]),
+    ]);
+    row.addEventListener('mousemove', (evt) => {
+      showTooltip(evt, `<b>${g.vendor}</b><br>${g.resp2_desc}<br>Orders: ${g.order_nos.join(', ')}<br>Max single order: ${fmtR(g.max_single_order)}`);
+    });
+    row.addEventListener('mouseleave', hideTooltip);
+    tbody.appendChild(row);
+  });
+}
+
 function renderDeptBars() {
   const deptBars = document.getElementById('dept-bars');
   clearChildren(deptBars);
@@ -901,6 +967,7 @@ function render() {
   renderSitaHero();
   renderVendorBars();
   renderStaleTable();
+  renderProcurement();
   renderDeptBars();
   renderTrend();
 }

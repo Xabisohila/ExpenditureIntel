@@ -83,6 +83,8 @@ function snapshot() {
     vendorBarCount: registry.get('vendor-bars').children.length,
     staleRowCount: registry.get('stale-tbody').children.length,
     deptBarCount: registry.get('dept-bars').children.length,
+    procurementRowCount: registry.get('procurement-tbody').children.length,
+    procurementSub: registry.get('procurement-sub')._text,
   };
 }
 

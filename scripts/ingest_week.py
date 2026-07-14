@@ -8,6 +8,7 @@ import build_dataset
 import reconcile
 import build_dashboard
 import weekly_delta
+import procurement_flags_report
 
 # The one gap known to genuinely exist across all weeks parsed so far (see
 # tests/test_reconciliation.py's TestFullPipelineReconciliation, which pins
@@ -22,16 +23,19 @@ def print_header(label):
 
 
 def main():
-    print_header("STEP 1/4: Building combined datasets")
+    print_header("STEP 1/5: Building combined datasets")
     dataset_summary = build_dataset.main()
 
-    print_header("STEP 2/4: Reconciling commitments vs expenditure")
+    print_header("STEP 2/5: Reconciling commitments vs expenditure")
     reconcile_summary = reconcile.main()
 
-    print_header("STEP 3/4: Building dashboard")
+    print_header("STEP 3/5: Checking procurement threshold proximity")
+    procurement_summary = procurement_flags_report.main()
+
+    print_header("STEP 4/5: Building dashboard")
     build_dashboard.main()
 
-    print_header("STEP 4/4: Computing week-over-week delta")
+    print_header("STEP 5/5: Computing week-over-week delta")
     delta_summary = weekly_delta.main()
 
     print_header("INGESTION SUMMARY")
@@ -63,6 +67,16 @@ def main():
         attention_needed = True
         print("! Reconciliation shows 0 gaps -- the known baseline gap appears to have resolved. "
               "If a new file explains this, update tests/test_reconciliation.py's pinned expectation.")
+
+    if procurement_summary['flagged']:
+        attention_needed = True
+        print(f"\n! {len(procurement_summary['flagged'])} procurement threshold-proximity flag(s) "
+              f"(combined same-vendor/item/week orders crossing R1,000,000 with no single order doing so) "
+              f"-- see data/processed/procurement_flags.csv. Not evidence of wrongdoing on its own; "
+              f"warrants a supply-chain-management look.")
+    else:
+        print(f"\nOK: no procurement threshold-proximity flags "
+              f"({len(procurement_summary['groups'])} multi-order groups checked against R1,000,000).")
 
     if delta_summary['has_delta']:
         v, d, r = delta_summary['vendor_deltas'], delta_summary['dept_deltas'], delta_summary['reconciliation_deltas']

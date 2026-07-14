@@ -13,6 +13,7 @@ from build_dashboard import (
     build_vendor_records,
     build_dept_series,
     build_reconciliation_data,
+    build_procurement_data,
     build_dashboard_data,
     render_html,
     TEMPLATE_PATH,
@@ -24,8 +25,9 @@ NODE_AVAILABLE = shutil.which('node') is not None
 DATES = ['2026-01-01', '2026-01-08', '2026-01-15']
 
 
-def _commit_row(vendor, resp1, date, balance):
-    return {'vendor': vendor, 'resp1_desc': resp1, 'report_date': date, 'commitments_balance': balance}
+def _commit_row(vendor, resp1, date, balance, order_no='OR-1', resp2='R2', item='ITEM'):
+    return {'vendor': vendor, 'resp1_desc': resp1, 'resp2_desc': resp2, 'item_desc': item,
+            'report_date': date, 'commitments_balance': balance, 'order_no': order_no}
 
 
 def _exp_row(resp1, date, expenses, commitments, budget, available):
@@ -54,6 +56,18 @@ COMMITMENT_ROWS = [
     _commit_row('VENDOR X', 'DEPT B', '2026-01-01', 50),
     _commit_row('VENDOR X', 'DEPT B', '2026-01-08', 50),
     _commit_row('VENDOR X', 'DEPT B', '2026-01-15', 50),
+    # VENDOR BIG: a single order at d0, then a second distinct order joins
+    # at d1 -- combined total crosses R1,000,000 while neither order does
+    # on its own, so this is a procurement-flag candidate at both d1 and
+    # d2. Balance is deliberately unchanged between d1 and d2 (streak of
+    # only 2) so it does not also trip the unrelated "newly stale" delta,
+    # and DEPT C has no expenditure rows so it doesn't touch dept_list/
+    # dept-bar assertions elsewhere in this file.
+    _commit_row('VENDOR BIG', 'DEPT C', '2026-01-01', 400000, order_no='OR-BIG-1'),
+    _commit_row('VENDOR BIG', 'DEPT C', '2026-01-08', 600000, order_no='OR-BIG-1'),
+    _commit_row('VENDOR BIG', 'DEPT C', '2026-01-08', 500000, order_no='OR-BIG-2'),
+    _commit_row('VENDOR BIG', 'DEPT C', '2026-01-15', 600000, order_no='OR-BIG-1'),
+    _commit_row('VENDOR BIG', 'DEPT C', '2026-01-15', 500000, order_no='OR-BIG-2'),
 ]
 
 EXPENDITURE_ROWS = [
@@ -110,12 +124,25 @@ class TestBuildReconciliationData(unittest.TestCase):
         self.assertEqual(data['reconciliation_gaps'][0]['item_desc'], 'ITEM2')
 
 
+class TestBuildProcurementData(unittest.TestCase):
+    def test_flags_the_synthetic_split_and_leaves_the_rest_unflagged(self):
+        data = build_procurement_data(COMMITMENT_ROWS)
+        groups = {(g['vendor'], g['report_date']): g for g in data['procurement_groups']}
+        self.assertEqual(groups[('VENDOR BIG', '2026-01-08')]['total'], 1_100_000.0)
+        self.assertTrue(groups[('VENDOR BIG', '2026-01-08')]['flagged'])
+        self.assertTrue(groups[('VENDOR BIG', '2026-01-15')]['flagged'])
+        # d0 has only one distinct order for VENDOR BIG, so it isn't a
+        # multi-order group at all.
+        self.assertNotIn(('VENDOR BIG', '2026-01-01'), groups)
+        self.assertEqual(data['procurement_threshold'], 1_000_000.0)
+
+
 class TestBuildDashboardData(unittest.TestCase):
     def test_produces_expected_shape(self):
         data = build_dashboard_data(COMMITMENT_ROWS, EXPENDITURE_ROWS, ITEM_RECON_ROWS)
         self.assertEqual(data['dates'], DATES)
         self.assertEqual(data['dept_list'], ['DEPT A', 'DEPT B'])
-        self.assertEqual(len(data['vendor_records']), 4)
+        self.assertEqual(len(data['vendor_records']), 5)
 
     def test_row_counts_for_the_download_links(self):
         data = build_dashboard_data(COMMITMENT_ROWS, EXPENDITURE_ROWS, ITEM_RECON_ROWS)
@@ -226,6 +253,20 @@ class TestDashboardScriptInBrowser(unittest.TestCase):
             with self.subTest(snapshot=snap_name):
                 self.assertEqual(self.result[snap_name]['tileCount'], 4)
                 self.assertEqual(self.result[snap_name]['deptBarCount'], 2)
+
+    def test_procurement_section_lists_the_flagged_synthetic_split(self):
+        # VENDOR BIG's group is flagged in both d1 and d2, and the section
+        # is not week-filtered (a rare pattern needs to stay visible even
+        # when the user is looking at an earlier snapshot), so both rows
+        # show regardless of which week is selected.
+        self.assertEqual(self.result['initial']['procurementRowCount'], 2)
+        self.assertIn('2 cross', self.result['initial']['procurementSub'])
+
+    def test_procurement_section_narrows_with_department_filter(self):
+        # DEPT A has no multi-order groups at all -- just the one
+        # "no matches" placeholder row, same pattern as the stale table.
+        self.assertEqual(self.result['deptFiltered']['procurementRowCount'], 1)
+        self.assertIn('0 same-vendor/item group(s) in DEPT A', self.result['deptFiltered']['procurementSub'])
 
 
 if __name__ == '__main__':

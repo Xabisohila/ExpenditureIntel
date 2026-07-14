@@ -64,6 +64,10 @@ scripts/build_dataset.py      parse everything, backfill missing department
 scripts/reconcile.py          cross-check the two reports, write
         │                     reconciliation_*.csv and vendor_weekly_trend.csv
         ▼
+scripts/procurement_flags_report.py   flag same-vendor/item orders whose
+        │                             combined total crosses the competitive-
+        │                             bidding threshold, write procurement_flags.csv
+        ▼
 scripts/build_dashboard.py    render data/processed/dashboard.html
         │
         ▼
@@ -71,9 +75,9 @@ scripts/weekly_delta.py       print what changed since the previous snapshot
 ```
 
 Run them in that order, or run `scripts/ingest_week.py` to chain all
-four and get a one-paragraph summary of what needs attention (parser
+five and get a one-paragraph summary of what needs attention (parser
 warnings, unresolved department-label blanks, any reconciliation gap
-beyond the one known baseline).
+beyond the one known baseline, any procurement threshold-proximity flag).
 
 ### Adding a new week's files
 
@@ -113,9 +117,11 @@ src/parsers/        commitment_xlsx_parser.py, expenditure_pdf_parser.py,
                      single file, self-validating against printed subtotals
 src/reconciliation.py   cross-report matching + department-label backfill
 src/delta.py            week-over-week diffing (streaks, threshold crossings)
+src/procurement_flags.py   same-vendor/item multi-order grouping +
+                         competitive-bidding threshold-proximity detection
 scripts/                one script per pipeline stage, thin CLI wrappers
                          around src/ — each also usable standalone
-tests/                   78 tests: unit tests against synthetic data (always
+tests/                   94 tests: unit tests against synthetic data (always
                          run) + integration tests pinning known-good output
                          against every real file (skip without data/raw/) +
                          dashboard tests that run the generated <script>
@@ -158,3 +164,20 @@ The full parsed datasets (`commitments.csv`, `expenditure.csv` — every
 vendor/order and every budget line, across all weeks, not just what's
 currently filtered on screen) are downloadable directly from the page,
 served as static files from `docs/data/`.
+
+### Procurement threshold review
+
+Eastern Cape Provincial Treasury Circular 03/2021-22 (disseminating National
+Treasury PFMA SCM Instruction 02/2021-22, effective 1 July 2021) requires
+open competitive bidding above R1,000,000 and prohibits deliberately
+splitting a purchase into smaller transactions to avoid that process. The
+dashboard groups commitment-ledger rows by (vendor, item, weekly snapshot)
+and flags any group where two or more distinct orders combine to cross that
+threshold while no single order does so on its own — the specific pattern
+the circular addresses. A group where some order already independently
+exceeds the threshold (e.g. a large existing contract drawn down across
+several GRVs) is deliberately not flagged, since that value was presumably
+already subject to the correct process on its own. This is a pattern
+surfaced for human review, not a finding of wrongdoing — legitimate reasons
+include staggered delivery against one contract or genuinely separate needs
+landing in the same week.

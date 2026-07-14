@@ -2,7 +2,11 @@ import csv
 import json
 import os
 import re
+import sys
 from collections import defaultdict
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+from procurement_flags import group_multi_order_purchases, flag_threshold_proximity, COMPETITIVE_BID_THRESHOLD
 
 PROCESSED_DIR = os.path.join(os.path.dirname(__file__), '..', 'data', 'processed')
 TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), 'dashboard_template.html')
@@ -94,6 +98,18 @@ def build_reconciliation_data(item_recon_rows):
     }
 
 
+def build_procurement_data(commitment_rows):
+    groups = group_multi_order_purchases(commitment_rows)
+    flagged = flag_threshold_proximity(groups, threshold=COMPETITIVE_BID_THRESHOLD)
+    flagged_keys = {(g['vendor'], g['resp2_desc'], g['item_desc'], g['report_date']) for g in flagged}
+    for g in groups:
+        g['flagged'] = (g['vendor'], g['resp2_desc'], g['item_desc'], g['report_date']) in flagged_keys
+    return {
+        'procurement_threshold': COMPETITIVE_BID_THRESHOLD,
+        'procurement_groups': groups,
+    }
+
+
 def build_dashboard_data(commitment_rows, expenditure_rows, item_recon_rows):
     """Pure: rows in, the dashboard's DATA dict out. No file I/O, so this is
     directly testable against small synthetic row lists rather than only
@@ -114,6 +130,7 @@ def build_dashboard_data(commitment_rows, expenditure_rows, item_recon_rows):
         'expenditure_row_count': len(expenditure_rows),
     }
     data.update(build_reconciliation_data(item_recon_rows))
+    data.update(build_procurement_data(commitment_rows))
     return data
 
 
