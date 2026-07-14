@@ -171,6 +171,15 @@
   .bar-row.dimmed { opacity: 0.35; }
   .bar-row.highlighted .bar-label { font-weight: 700; color: var(--series-1); }
 
+  #dept-bars .bar-row { grid-template-columns: 150px 56px 1fr 100px; }
+  .health-badge {
+    font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 999px;
+    white-space: nowrap; text-align: center; font-variant-numeric: tabular-nums;
+  }
+  .health-badge.health-good { background: color-mix(in srgb, var(--status-good) 18%, transparent); color: var(--status-good); }
+  .health-badge.health-warning { background: color-mix(in srgb, var(--status-warning) 18%, transparent); color: var(--status-warning); }
+  .health-badge.health-critical { background: color-mix(in srgb, var(--status-critical) 18%, transparent); color: var(--status-critical); }
+
   .delta-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 22px; }
   @media (max-width: 720px) { .delta-grid { grid-template-columns: 1fr; } }
   .delta-group h3 {
@@ -327,7 +336,7 @@
   </section>
 
   <section id="budget">
-    <h2>Budget burn-down by responsibility unit</h2>
+    <h2>Budget burn-down &amp; health score by responsibility unit</h2>
     <p class="section-sub" id="budget-sub"></p>
     <div class="chart-card">
       <div class="bar-list" id="dept-bars"></div>
@@ -512,6 +521,61 @@ function computeDeptDeltas(deptFilter, prevIndex, currIndex) {
   return { crossings, movers };
 }
 
+// ---- department health score -- a single 0-100 number (with a plain-
+// language "why", not a black box) combining the signals already computed
+// above: budget pressure, stale vendors, procurement flags, and whether a
+// budget threshold was newly crossed this specific week. Deducts named,
+// capped penalties from 100 rather than a continuous formula, so the
+// score and the reason list always agree on what's dragging it down. ----
+const HEALTH_STALE_PENALTY_PER_VENDOR = 5;
+const HEALTH_STALE_PENALTY_CAP = 20;
+const HEALTH_PROCUREMENT_PENALTY_PER_FLAG = 10;
+const HEALTH_PROCUREMENT_PENALTY_CAP = 20;
+const HEALTH_CROSSING_PENALTY = 10;
+
+function computeDeptHealth(dept, weekIndex) {
+  const reasons = [];
+  let score = 100;
+
+  const pct = deptPctAt(dept, weekIndex);
+  if (pct !== null) {
+    if (pct >= 100) { score -= 35; reasons.push(`${pct}% of budget already committed (over budget)`); }
+    else if (pct >= 75) { score -= 20; reasons.push(`${pct}% of budget committed`); }
+    else if (pct >= 50) { score -= 8; reasons.push(`${pct}% of budget committed`); }
+  }
+
+  const staleCount = [...vendorFullSeries(dept).values()].filter(series => {
+    const bal = series[weekIndex];
+    return bal && streakEndingAt(series, weekIndex) >= STALE_STREAK_THRESHOLD;
+  }).length;
+  if (staleCount > 0) {
+    score -= Math.min(HEALTH_STALE_PENALTY_CAP, staleCount * HEALTH_STALE_PENALTY_PER_VENDOR);
+    reasons.push(`${staleCount} vendor${staleCount === 1 ? '' : 's'} with no balance movement for 3+ weeks`);
+  }
+
+  const currDate = DATA.dates[weekIndex];
+  const procFlags = DATA.procurement_groups.filter(g => g.flagged && g.resp1_desc === dept && g.report_date === currDate);
+  if (procFlags.length > 0) {
+    score -= Math.min(HEALTH_PROCUREMENT_PENALTY_CAP, procFlags.length * HEALTH_PROCUREMENT_PENALTY_PER_FLAG);
+    reasons.push(`${procFlags.length} procurement threshold flag${procFlags.length === 1 ? '' : 's'} this week`);
+  }
+
+  if (weekIndex > 0) {
+    const prevPct = deptPctAt(dept, weekIndex - 1);
+    if (prevPct !== null && pct !== null) {
+      const crossed = BUDGET_THRESHOLDS.filter(t => prevPct < t && t <= pct);
+      if (crossed.length) {
+        score -= HEALTH_CROSSING_PENALTY;
+        reasons.push(`crossed the ${Math.max(...crossed)}% budget threshold this week`);
+      }
+    }
+  }
+
+  score = Math.max(0, Math.min(100, score));
+  const tier = score >= 85 ? 'good' : (score >= 60 ? 'warning' : 'critical');
+  return { score, tier, reasons };
+}
+
 function computeReconciliationDeltas(prevDate, currDate) {
   const key = g => g.resp2_desc + '|' + g.item_desc;
   const prevGaps = DATA.reconciliation_gaps.filter(g => g.report_date === prevDate);
@@ -609,7 +673,9 @@ function renderScopedProse() {
     `Unpaid GRV/order balances by vendor${scopeSuffix}, ${date} snapshot, with the ${numWeeks}-week trend.`;
   document.getElementById('vendor-legend-label').textContent = `Outstanding balance, ${date} (excl. SITA)`;
   document.getElementById('budget-sub').textContent =
-    `Share of each unit's annual budget already spent or committed, ${date} snapshot. Sorted highest first.` +
+    `Share of each unit's annual budget already spent or committed, ${date} snapshot, alongside a health score ` +
+    `(100 minus penalties for budget pressure, stale vendors, procurement flags, and threshold crossings this week ` +
+    `-- hover a row for the breakdown). Sorted worst health first.` +
     (deptFilter === 'ALL' ? '' : ` ${deptFilter} is highlighted.`);
   document.getElementById('trend-sub').textContent =
     `Percent of budget spent + committed, tracked across all ${numWeeks} snapshots. Point spacing on the x-axis reflects actual elapsed time between reports, not report sequence -- see exact dates on the axis.`;
@@ -825,10 +891,11 @@ function renderDeptBars() {
   clearChildren(deptBars);
   const { dept: deptFilter, weekIndex } = state;
 
+  const tierEmoji = { good: '🟢', warning: '🟡', critical: '🔴' };
   const ranked = DATA.dept_list
-    .map(d => ({ dept: d, ...DATA.dept_series[d][weekIndex] }))
+    .map(d => ({ dept: d, ...DATA.dept_series[d][weekIndex], health: computeDeptHealth(d, weekIndex) }))
     .filter(r => r.pct !== null)
-    .sort((a, b) => b.pct - a.pct);
+    .sort((a, b) => a.health.score - b.health.score || b.pct - a.pct);
 
   ranked.forEach(d => {
     const statusColor = d.pct >= 75 ? 'var(--status-critical)' : (d.pct >= 50 ? 'var(--status-warning)' : 'var(--status-good)');
@@ -836,13 +903,21 @@ function renderDeptBars() {
     track.appendChild(el('div', {class:'bar-fill', style:`width:${Math.min(d.pct,100)}%; background:${statusColor};`}));
     const isSelected = deptFilter !== 'ALL' && d.dept === deptFilter;
     const rowClass = 'bar-row hoverable' + (isSelected ? ' highlighted' : (deptFilter !== 'ALL' ? ' dimmed' : ''));
+    const healthBadge = el('div', {class: 'health-badge health-' + d.health.tier},
+      [`${tierEmoji[d.health.tier]} ${d.health.score}`]);
     const row = el('div', {class: rowClass}, [
       el('div', {class:'bar-label', title: d.dept}, [d.dept]),
+      healthBadge,
       track,
       el('div', {class:'bar-value'}, [d.pct + '%']),
     ]);
     row.addEventListener('mousemove', (evt) => {
-      showTooltip(evt, `<b>${d.dept}</b><br>Budget: ${fmtR(d.budget)}<br>Expenses: ${fmtR(d.expenses)}<br>Commitments: ${fmtR(d.commitments)}<br>Available: ${fmtR(d.available)}`);
+      const reasonsHtml = d.health.reasons.length
+        ? d.health.reasons.map(r => `• ${r}`).join('<br>')
+        : 'No issues flagged for this department.';
+      showTooltip(evt, `<b>${d.dept}</b> — health ${d.health.score} ${tierEmoji[d.health.tier]}<br>` +
+        `Budget: ${fmtR(d.budget)}<br>Expenses: ${fmtR(d.expenses)}<br>Commitments: ${fmtR(d.commitments)}<br>Available: ${fmtR(d.available)}` +
+        `<br><br>${reasonsHtml}`);
     });
     row.addEventListener('mouseleave', hideTooltip);
     row.addEventListener('click', () => {

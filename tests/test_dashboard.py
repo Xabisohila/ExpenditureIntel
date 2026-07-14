@@ -307,6 +307,19 @@ class TestDashboardScriptInBrowser(unittest.TestCase):
                 self.assertEqual(self.result[snap_name]['tileCount'], 4)
                 self.assertEqual(self.result[snap_name]['deptBarCount'], 2)
 
+    def test_dept_health_scores_and_sorts_worst_first(self):
+        # DEPT A: 90% committed (-20), 1 stale vendor (-5), crossed a
+        # threshold this week (-10) = 65 -> warning tier.
+        # DEPT B: under 50% committed (no penalty), 1 stale vendor (-5),
+        # no threshold crossing = 95 -> good tier.
+        # Sorted worst health first, so DEPT A (65) comes before DEPT B (95)
+        # despite DEPT A being alphabetically first anyway here -- the real
+        # signal is the score driving order, not the name.
+        self.assertEqual(self.result['initial']['deptHealth'], [
+            {'dept': 'DEPT A', 'badge': '🟡 65'},
+            {'dept': 'DEPT B', 'badge': '🟢 95'},
+        ])
+
     def test_procurement_section_lists_the_flagged_synthetic_split(self):
         # VENDOR BIG's group is flagged in both d1 and d2, and the section
         # is not week-filtered (a rare pattern needs to stay visible even

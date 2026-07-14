@@ -95,6 +95,10 @@ function snapshot() {
     narrativeLead: findByClass('narrative-lead') ? flattenText(findByClass('narrative-lead')) : null,
     narrativeHeader: findByClass('narrative-header') ? flattenText(findByClass('narrative-header')) : null,
     narrativeSentences: narrativeList ? narrativeList.children.map(flattenText) : [],
+    deptHealth: registry.get('dept-bars').children.map(row => ({
+      dept: flattenText(row.children[0]),
+      badge: flattenText(row.children[1]),
+    })),
   };
 }
 

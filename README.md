@@ -121,7 +121,7 @@ src/procurement_flags.py   same-vendor/item multi-order grouping +
                          competitive-bidding threshold-proximity detection
 scripts/                one script per pipeline stage, thin CLI wrappers
                          around src/ — each also usable standalone
-tests/                   99 tests: unit tests against synthetic data (always
+tests/                   100 tests: unit tests against synthetic data (always
                          run) + integration tests pinning known-good output
                          against every real file (skip without data/raw/) +
                          dashboard tests that run the generated <script>
@@ -171,6 +171,14 @@ category (newly stale vendors, budget threshold crossings, reconciliation
 gaps appearing/resolving) for whichever two consecutive weeks the week
 filter selects — the same computation as `weekly_delta.py`, ported to JS
 so it's visible on the published page without anyone running a script.
+
+The department ranking carries a health score (100 minus named, capped
+penalties for budget pressure, stale vendors, procurement flags, and a
+threshold crossing this specific week) alongside the existing % committed
+bar, sorted worst health first instead of highest spend first. It's
+deliberately a sum of named reasons rather than a continuous formula, so
+the score and the "why" (visible on hover, or by clicking a row to scope
+the narrative/delta panels to that department) never disagree.
 
 The full parsed datasets (`commitments.csv`, `expenditure.csv` — every
 vendor/order and every budget line, across all weeks, not just what's
