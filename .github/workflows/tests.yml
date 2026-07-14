@@ -16,6 +16,14 @@ jobs:
         with:
           python-version: "3.11"
 
+      # The dashboard tests (tests/test_dashboard.py) run the generated
+      # <script> under Node to verify it actually executes, not just that
+      # the Python data feeding it is correct. ubuntu-latest ships Node by
+      # default, but pin it explicitly rather than depending on that.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - name: Install dependencies
         run: pip install -r requirements.txt
 

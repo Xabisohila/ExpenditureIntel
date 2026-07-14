@@ -94,11 +94,10 @@ def build_reconciliation_data(item_recon_rows):
     }
 
 
-def main():
-    commitment_rows = read_csv(os.path.join(PROCESSED_DIR, 'commitments.csv'))
-    expenditure_rows = read_csv(os.path.join(PROCESSED_DIR, 'expenditure.csv'))
-    item_recon_rows = read_csv(os.path.join(PROCESSED_DIR, 'reconciliation_item_level.csv'))
-
+def build_dashboard_data(commitment_rows, expenditure_rows, item_recon_rows):
+    """Pure: rows in, the dashboard's DATA dict out. No file I/O, so this is
+    directly testable against small synthetic row lists rather than only
+    ever against the real (gitignored) dataset."""
     dates = sorted(set(r['report_date'] for r in commitment_rows) | set(r['report_date'] for r in expenditure_rows))
 
     vendor_records = build_vendor_records(commitment_rows, dates)
@@ -113,11 +112,15 @@ def main():
         'vendor_records': vendor_records,
     }
     data.update(build_reconciliation_data(item_recon_rows))
+    return data
 
+
+def render_html(data, template_path=TEMPLATE_PATH):
+    """Pure: DATA dict + template path in, the final HTML string out."""
     json_str = json.dumps(data)
     assert '</script' not in json_str.lower(), "vendor/department names collided with a script-closing tag"
 
-    with open(TEMPLATE_PATH, encoding='utf-8') as f:
+    with open(template_path, encoding='utf-8') as f:
         template = f.read()
     # A replacement *function* (not a string) is required here: re.sub
     # treats backslashes in a string replacement specially (\1, \g<name>,
@@ -125,12 +128,22 @@ def main():
     # collide with that. A lambda inserts the return value verbatim.
     html, n = re.subn(r'const DATA = __DATA_JSON__;', lambda m: 'const DATA = ' + json_str + ';', template, count=1)
     assert n == 1, "template's __DATA_JSON__ placeholder not found"
+    return html
+
+
+def main():
+    commitment_rows = read_csv(os.path.join(PROCESSED_DIR, 'commitments.csv'))
+    expenditure_rows = read_csv(os.path.join(PROCESSED_DIR, 'expenditure.csv'))
+    item_recon_rows = read_csv(os.path.join(PROCESSED_DIR, 'reconciliation_item_level.csv'))
+
+    data = build_dashboard_data(commitment_rows, expenditure_rows, item_recon_rows)
+    html = render_html(data)
 
     with open(OUTPUT_PATH, 'w', encoding='utf-8') as f:
         f.write(html)
-    num_vendor_records = len(vendor_records)
     print(f"wrote {OUTPUT_PATH}")
-    print(f"  {len(dept_list)} responsibility units, {num_vendor_records} vendor/department records across {len(dates)} weeks")
+    print(f"  {len(data['dept_list'])} responsibility units, {len(data['vendor_records'])} vendor/department records "
+          f"across {len(data['dates'])} weeks")
 
     return data
 
