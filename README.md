@@ -115,9 +115,11 @@ src/reconciliation.py   cross-report matching + department-label backfill
 src/delta.py            week-over-week diffing (streaks, threshold crossings)
 scripts/                one script per pipeline stage, thin CLI wrappers
                          around src/ — each also usable standalone
-tests/                   65 tests: unit tests against synthetic data (always
+tests/                   78 tests: unit tests against synthetic data (always
                          run) + integration tests pinning known-good output
-                         against every real file (skip without data/raw/)
+                         against every real file (skip without data/raw/) +
+                         dashboard tests that run the generated <script>
+                         under Node (skip without node on PATH)
 data/raw/                gitignored — the weekly source files
 data/processed/           gitignored — everything the pipeline produces
 docs/                    published dashboard (served by GitHub Pages)
