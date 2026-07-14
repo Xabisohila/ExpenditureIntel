@@ -229,6 +229,27 @@ class TestDashboardScriptInBrowser(unittest.TestCase):
         self.assertEqual(self.result['expenditureCount'], f'({len(EXPENDITURE_ROWS)} rows)')
         self.assertIn('parsed dataset', self.result['downloadSub'].lower())
 
+    def test_filtered_csv_reflects_the_unfiltered_latest_scope(self):
+        # ALL departments, latest week: every vendor with a positive
+        # balance that week, summed across departments, sorted highest
+        # first -- not the chart's top-10-excluding-SITA view.
+        self.assertEqual(self.result['initial']['filteredCount'], '(3 vendors in current scope)')
+        expected = (
+            'vendor,outstanding_balance,department_filter,week\r\n'
+            'VENDOR BIG,1100000.00,ALL,2026-01-15\r\n'
+            'VENDOR Z,20000.00,ALL,2026-01-15\r\n'
+            'VENDOR X,150.00,ALL,2026-01-15'
+        )
+        self.assertEqual(self.result['initialFilteredCsv'], expected)
+
+    def test_filtered_csv_narrows_with_department_filter(self):
+        self.assertEqual(self.result['deptFiltered']['filteredCount'], '(1 vendor in current scope)')
+        expected = (
+            'vendor,outstanding_balance,department_filter,week\r\n'
+            'VENDOR X,100.00,DEPT A,2026-01-15'
+        )
+        self.assertEqual(self.result['deptFilteredCsv'], expected)
+
     def test_earliest_week_has_no_prior_snapshot(self):
         earliest = self.result['earliestWeek']
         self.assertTrue(earliest['deltaIsEmptyState'])

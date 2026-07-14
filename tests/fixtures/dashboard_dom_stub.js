@@ -85,12 +85,21 @@ function snapshot() {
     deptBarCount: registry.get('dept-bars').children.length,
     procurementRowCount: registry.get('procurement-tbody').children.length,
     procurementSub: registry.get('procurement-sub')._text,
+    filteredCount: registry.get('filtered-count')._text,
   };
 }
 
 require(path.resolve(scriptPath));
 
 const out = { initial: snapshot() };
+
+// The filtered-CSV button has no real DOM/Blob/URL in this harness, so its
+// click handler stashes the generated CSV text on the element itself
+// (see dashboard_template.html) instead of actually triggering a download --
+// that stashed text is what lets this test suite verify the CSV content.
+const filteredDownloadBtn = registry.get('download-filtered');
+filteredDownloadBtn.fire('click');
+out.initialFilteredCsv = filteredDownloadBtn._lastCsv;
 // download-sub/commitments-count/expenditure-count get their text set by
 // JS; the <a href> targets are static markup the JS never touches, so
 // those are checked directly against the rendered HTML string in Python
@@ -119,6 +128,8 @@ if (firstDept) {
 }
 out.deptFiltered = snapshot();
 out.firstDept = firstDept;
+filteredDownloadBtn.fire('click');
+out.deptFilteredCsv = filteredDownloadBtn._lastCsv;
 
 resetBtn.fire('click');
 out.afterReset = snapshot();

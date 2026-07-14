@@ -121,7 +121,7 @@ src/procurement_flags.py   same-vendor/item multi-order grouping +
                          competitive-bidding threshold-proximity detection
 scripts/                one script per pipeline stage, thin CLI wrappers
                          around src/ — each also usable standalone
-tests/                   94 tests: unit tests against synthetic data (always
+tests/                   96 tests: unit tests against synthetic data (always
                          run) + integration tests pinning known-good output
                          against every real file (skip without data/raw/) +
                          dashboard tests that run the generated <script>
@@ -163,7 +163,12 @@ without anyone running a script.
 The full parsed datasets (`commitments.csv`, `expenditure.csv` — every
 vendor/order and every budget line, across all weeks, not just what's
 currently filtered on screen) are downloadable directly from the page,
-served as static files from `docs/data/`.
+served as static files from `docs/data/`. A third button, "filtered view
+(CSV)", generates a CSV client-side (via a Blob URL, no server round trip)
+of the vendor/balance scope currently selected by the department + week
+filters — every vendor with a positive balance in that scope, sorted
+highest first, not just the top-10-excluding-SITA subset drawn in the
+bar chart.
 
 ### Procurement threshold review
 

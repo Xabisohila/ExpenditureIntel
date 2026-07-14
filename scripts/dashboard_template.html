@@ -205,6 +205,7 @@
   }
   .download-btn:hover { border-color: var(--series-1); color: var(--series-1); }
   .download-btn .download-count { color: var(--text-muted); font-weight: 400; }
+  button.download-btn { font: inherit; cursor: pointer; }
 
   .procurement-caveat {
     margin-bottom: 14px; padding: 10px 14px; border-radius: 8px;
@@ -237,6 +238,9 @@
       <a class="download-btn" id="download-expenditure" href="data/expenditure.csv" download>
         ⬇ expenditure.csv <span class="download-count" id="expenditure-count"></span>
       </a>
+      <button type="button" class="download-btn" id="download-filtered">
+        ⬇ filtered view (CSV) <span class="download-count" id="filtered-count"></span>
+      </button>
     </div>
   </div>
 
@@ -513,6 +517,55 @@ document.getElementById('download-sub').textContent =
   `The full parsed dataset behind everything on this page -- every vendor/order and every budget line, across all ${numWeeks} weeks.`;
 document.getElementById('commitments-count').textContent = `(${DATA.commitments_row_count.toLocaleString('en-ZA')} rows)`;
 document.getElementById('expenditure-count').textContent = `(${DATA.expenditure_row_count.toLocaleString('en-ZA')} rows)`;
+
+// ---- filtered-view CSV export -- a client-side snapshot of exactly the
+// vendor/balance scope currently selected by the dept + week filters,
+// not merely the (SITA-excluded, top-10) bars drawn on screen. ----
+function csvEscapeField(v) {
+  const s = String(v);
+  return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+function filteredVendorRows(deptFilter, weekIndex) {
+  const totals = vendorTotalsAt(deptFilter, weekIndex);
+  return [...totals.entries()].filter(([, b]) => b > 0).sort((a, b) => b[1] - a[1]);
+}
+
+function buildFilteredCsv(deptFilter, weekIndex) {
+  const date = DATA.dates[weekIndex];
+  const lines = ['vendor,outstanding_balance,department_filter,week'];
+  filteredVendorRows(deptFilter, weekIndex).forEach(([vendor, balance]) => {
+    lines.push([csvEscapeField(vendor), balance.toFixed(2), csvEscapeField(deptFilter), date].join(','));
+  });
+  return lines.join('\r\n');
+}
+
+function slugify(s) {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-+|-+$)/g, '') || 'all-departments';
+}
+
+const filteredDownloadBtn = document.getElementById('download-filtered');
+filteredDownloadBtn.addEventListener('click', () => {
+  const csv = buildFilteredCsv(state.dept, state.weekIndex);
+  // Exposed on the element for the Node test harness (which has no real
+  // DOM/Blob/URL) to inspect; a no-op in a real browser.
+  filteredDownloadBtn._lastCsv = csv;
+  if (!document.body) return;
+  const blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `filtered_vendor_balances_${slugify(state.dept)}_${DATA.dates[state.weekIndex]}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
+
+function renderFilteredDownload() {
+  const n = filteredVendorRows(state.dept, state.weekIndex).length;
+  document.getElementById('filtered-count').textContent = `(${n} vendor${n === 1 ? '' : 's'} in current scope)`;
+}
 
 (function() {
   const footerEl = document.getElementById('footer-text');
@@ -962,6 +1015,7 @@ function renderDelta() {
 
 function render() {
   renderScopedProse();
+  renderFilteredDownload();
   renderDelta();
   renderTiles();
   renderSitaHero();
